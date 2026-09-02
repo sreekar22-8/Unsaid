@@ -4,7 +4,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
-import { CompanionPage, InsightsPage, JournalPage, MemoryPage, SettingsPage } from '@/pages/unsaid-pages';
+import { ChatPage, CompanionPage, InsightsPage, JournalPage, MemoryPage, SettingsPage } from '@/pages/unsaid-pages';
 import {
   Route,
   Switch,
@@ -21,7 +21,7 @@ function Router() {
     <RoutedErrorBoundary>
       <Switch>
          <Route path="/" component={CompanionPage} />
-         <Route path="/chat" component={CompanionPage} />
+         <Route path="/chat" component={ChatPage} />
          <Route path="/journal" component={JournalPage} />
          <Route path="/insights" component={InsightsPage} />
          <Route path="/memory" component={MemoryPage} />
