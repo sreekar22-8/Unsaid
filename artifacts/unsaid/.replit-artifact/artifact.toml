@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Unsaid"
+description = "A private AI companion for understanding unspoken emotions through reflective conversation, emotion check-ins, journaling, an emotional dashboard, and user-controlled memory."
+version = "1.0.0"
+id = "artifacts/unsaid"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 24527
+
+[services.development]
+run = "pnpm --filter @workspace/unsaid run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/unsaid", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/unsaid/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "24527"
+BASE_PATH = "/"

@@ -1,0 +1,1 @@
+- [OpenAPI integer compatibility](api-contract-zod-version.md) — generated Zod currently requires numeric schemas instead of OpenAPI integer types.

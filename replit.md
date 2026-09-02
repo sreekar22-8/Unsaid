@@ -1,6 +1,6 @@
-# [Project name]
+# Unsaid
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Unsaid is a private AI companion for understanding unspoken emotions through reflective conversation, journaling, and user-controlled memory.
 
 ## Run & Operate
 
@@ -22,23 +22,32 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/unsaid/src/pages/unsaid-pages.tsx` — companion, journal, insights, memory, and settings screens
+- `artifacts/unsaid/src/components/unsaid-ui.tsx` — shared shell and UI primitives
+- `artifacts/unsaid/src/index.css` — Unsaid theme tokens, typography, texture, and motion
+- `artifacts/api-server/src/routes/companion.ts` — companion API routes and seeded first-use experience
+- `lib/api-spec/openapi.yaml` — source of truth for the companion API
+- `lib/db/src/schema/unsaid.ts` — persisted conversations, messages, journal, memory, and settings
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- API contracts are defined in OpenAPI and generated into the shared client before server or UI integration.
+- Data is scoped to the current workspace demo user until authentication is added; records persist in PostgreSQL.
+- Conversation mode is sent with each message so changing Listen, Understand, Help, or Private note affects saved behavior.
+- The first request seeds a small reflective starter space, a journal entry, and two example memories.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+The app offers AI-style reflective chat with four modes, private notes, emotion detection, an emotional journal, an insights dashboard, and explicit memory controls. The current environment does not have AI integration access or an OpenAI key, so the server uses a deterministic reflective responder while keeping the AI boundary ready to replace.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+No additional user preferences recorded.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Regenerate the API client with `pnpm --filter @workspace/api-spec run codegen` after changing `lib/api-spec/openapi.yaml`.
+- Development schema changes use `pnpm --filter @workspace/db run push`; production schema changes are applied through Publish.
 
 ## Pointers
 

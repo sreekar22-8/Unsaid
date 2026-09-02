@@ -10,6 +10,8 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: companion
+    description: Unsaid companion operations
 paths:
   /healthz:
     get:
@@ -24,7 +26,237 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /companion/bootstrap:
+    get:
+      operationId: getCompanionBootstrap
+      tags: [companion]
+      summary: Load the companion workspace
+      responses:
+        "200":
+          description: Companion workspace data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CompanionBootstrap"
+  /companion/conversations:
+    get:
+      operationId: listConversations
+      tags: [companion]
+      summary: List recent conversations
+      responses:
+        "200":
+          description: Conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Conversation"
+    post:
+      operationId: createConversation
+      tags: [companion]
+      summary: Start a conversation
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConversationInput"
+      responses:
+        "201":
+          description: Created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Conversation"
+  /companion/conversations/{conversationId}/messages:
+    get:
+      operationId: listMessages
+      tags: [companion]
+      summary: List messages in a conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+    post:
+      operationId: sendMessage
+      tags: [companion]
+      summary: Send a message to Unsaid
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MessageInput"
+      responses:
+        "200":
+          description: User and assistant messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Message"
+  /companion/emotions/detect:
+    post:
+      operationId: detectEmotion
+      tags: [companion]
+      summary: Detect emotional signals in text
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmotionDetectionInput"
+      responses:
+        "200":
+          description: Detected emotions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmotionDetection"
+  /companion/journal:
+    get:
+      operationId: listJournalEntries
+      tags: [companion]
+      summary: List journal entries
+      responses:
+        "200":
+          description: Journal entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/JournalEntry"
+    post:
+      operationId: createJournalEntry
+      tags: [companion]
+      summary: Create a journal entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalEntryInput"
+      responses:
+        "201":
+          description: Created journal entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+  /companion/journal/{entryId}:
+    patch:
+      operationId: updateJournalEntry
+      tags: [companion]
+      summary: Update a journal entry
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JournalEntryUpdate"
+      responses:
+        "200":
+          description: Updated journal entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JournalEntry"
+    delete:
+      operationId: deleteJournalEntry
+      tags: [companion]
+      summary: Delete a journal entry
+      parameters:
+        - $ref: "#/components/parameters/EntryId"
+      responses:
+        "204":
+          description: Deleted
+  /companion/memory:
+    get:
+      operationId: listMemories
+      tags: [companion]
+      summary: List remembered details
+      responses:
+        "200":
+          description: Memories
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Memory"
+    patch:
+      operationId: updateMemorySettings
+      tags: [companion]
+      summary: Update memory settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MemorySettings"
+      responses:
+        "200":
+          description: Updated memory settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MemorySettings"
+  /companion/memory/{memoryId}:
+    delete:
+      operationId: deleteMemory
+      tags: [companion]
+      summary: Forget a remembered detail
+      parameters:
+        - $ref: "#/components/parameters/MemoryId"
+      responses:
+        "204":
+          description: Deleted
+  /companion/dashboard:
+    get:
+      operationId: getDashboardSummary
+      tags: [companion]
+      summary: Get emotional dashboard summary
+      responses:
+        "200":
+          description: Dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
 components:
+  parameters:
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema:
+        type: number
+    EntryId:
+      name: entryId
+      in: path
+      required: true
+      schema:
+        type: number
+    MemoryId:
+      name: memoryId
+      in: path
+      required: true
+      schema:
+        type: number
   schemas:
     HealthStatus:
       type: object
@@ -33,4 +265,124 @@ components:
           type: string
       required:
         - status
+    Conversation:
+      type: object
+      required: [id, title, mode, createdAt, updatedAt]
+      properties:
+        id: { type: number }
+        title: { type: string }
+        mode: { type: string, enum: [listen, understand, help, private] }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    ConversationInput:
+      type: object
+      properties:
+        title: { type: string }
+        mode: { type: string, enum: [listen, understand, help, private] }
+    Message:
+      type: object
+      required: [id, conversationId, role, content, createdAt]
+      properties:
+        id: { type: number }
+        conversationId: { type: number }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        createdAt: { type: string }
+        emotion: { type: ["string", "null"] }
+    MessageInput:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1 }
+        mode: { type: string, enum: [listen, understand, help, private] }
+    EmotionDetectionInput:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1 }
+    EmotionDetection:
+      type: object
+      required: [primary, secondary, intensity, signals, reflection]
+      properties:
+        primary: { type: string }
+        secondary: { type: array, items: { type: string } }
+        intensity: { type: number }
+        signals: { type: array, items: { type: string } }
+        reflection: { type: string }
+    JournalEntry:
+      type: object
+      required: [id, title, content, mood, createdAt, updatedAt]
+      properties:
+        id: { type: number }
+        title: { type: string }
+        content: { type: string }
+        mood: { type: string }
+        createdAt: { type: string }
+        updatedAt: { type: string }
+    JournalEntryInput:
+      type: object
+      required: [content]
+      properties:
+        title: { type: string }
+        content: { type: string, minLength: 1 }
+        mood: { type: string }
+    JournalEntryUpdate:
+      type: object
+      properties:
+        title: { type: string }
+        content: { type: string, minLength: 1 }
+        mood: { type: string }
+    Memory:
+      type: object
+      required: [id, label, detail, enabled, createdAt]
+      properties:
+        id: { type: number }
+        label: { type: string }
+        detail: { type: string }
+        enabled: { type: boolean }
+        createdAt: { type: string }
+    MemorySettings:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: { type: boolean }
+    DashboardSummary:
+      type: object
+      required: [checkIns, journalEntries, conversations, streak, topEmotions, weeklyIntensity]
+      properties:
+        checkIns: { type: number }
+        journalEntries: { type: number }
+        conversations: { type: number }
+        streak: { type: number }
+        topEmotions:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmotionCount"
+        weeklyIntensity:
+          type: array
+          items:
+            $ref: "#/components/schemas/IntensityPoint"
+    EmotionCount:
+      type: object
+      required: [emotion, count, color]
+      properties:
+        emotion: { type: string }
+        count: { type: number }
+        color: { type: string }
+    IntensityPoint:
+      type: object
+      required: [day, value]
+      properties:
+        day: { type: string }
+        value: { type: number }
+    CompanionBootstrap:
+      type: object
+      required: [conversations, messages, memories, memoryEnabled, dashboard, journalEntries]
+      properties:
+        conversations: { type: array, items: { $ref: "#/components/schemas/Conversation" } }
+        messages: { type: array, items: { $ref: "#/components/schemas/Message" } }
+        memories: { type: array, items: { $ref: "#/components/schemas/Memory" } }
+        memoryEnabled: { type: boolean }
+        dashboard: { $ref: "#/components/schemas/DashboardSummary" }
+        journalEntries: { type: array, items: { $ref: "#/components/schemas/JournalEntry" } }
 
