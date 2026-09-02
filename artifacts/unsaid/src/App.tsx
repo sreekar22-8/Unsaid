@@ -21,6 +21,7 @@ function Router() {
     <RoutedErrorBoundary>
       <Switch>
          <Route path="/" component={CompanionPage} />
+         <Route path="/chat" component={CompanionPage} />
          <Route path="/journal" component={JournalPage} />
          <Route path="/insights" component={InsightsPage} />
          <Route path="/memory" component={MemoryPage} />

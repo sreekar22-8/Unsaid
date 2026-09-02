@@ -11,6 +11,13 @@ const secondaryItems = [
   { href: '/memory', label: 'Memory', icon: LockKeyhole },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
+const topNavItems = [
+  { href: '/', label: 'Home' },
+  { href: '/chat', label: 'Chat' },
+  { href: '/journal', label: 'Journal' },
+  { href: '/insights', label: 'Dashboard' },
+  { href: '/memory', label: 'Memory' },
+];
 
 export function Logo({ compact = false }: { compact?: boolean }) {
   return <Link href="/" className="flex items-center gap-2.5" data-testid="link-logo">
@@ -49,9 +56,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </Link>
     </aside>
     <div className="md:pl-[248px]">
-      <header className="sticky top-0 z-20 flex h-[68px] items-center justify-between border-b border-border/70 bg-background/90 px-5 backdrop-blur-xl md:px-9">
+      <header className="sticky top-0 z-20 flex min-h-[68px] flex-wrap items-center justify-between border-b border-border/70 bg-background/90 px-5 py-2 backdrop-blur-xl md:flex-nowrap md:px-9 md:py-0">
         <button className="rounded-xl p-2 hover:bg-muted md:hidden" onClick={() => setMobileOpen(true)} aria-label="Open navigation" data-testid="button-open-menu"><Menu size={20} /></button>
         <div className="hidden items-center gap-2 font-mono-ui text-[10px] uppercase tracking-[.16em] text-muted-foreground md:flex"><span className="size-1.5 rounded-full bg-primary animate-pulse-soft" />Private by default</div>
+        <nav className="order-3 flex w-full items-center gap-1 overflow-x-auto border-t border-border/60 pt-2 md:order-none md:absolute md:left-1/2 md:w-auto md:-translate-x-1/2 md:border-t-0 md:pt-0" aria-label="Primary navigation">
+          {topNavItems.map((item) => {
+            const isActive = active(item.href);
+            return <Link key={item.href} href={item.href} className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[11px] font-semibold transition-colors md:px-3.5 ${isActive ? 'bg-secondary text-primary' : 'text-muted-foreground hover:bg-muted hover:text-foreground'}`} aria-current={isActive ? 'page' : undefined} data-testid={`link-top-nav-${item.label.toLowerCase()}`}>{item.label}</Link>;
+          })}
+        </nav>
         <div className="ml-auto flex items-center gap-2 text-muted-foreground"><button className="rounded-xl p-2 hover:bg-muted" aria-label="More options" data-testid="button-more-options"><MoreHorizontal size={19} /></button><span className="hidden text-xs sm:inline">Take your time.</span></div>
       </header>
       <main className="mx-auto max-w-[1320px] px-5 py-7 md:px-9 md:py-10">{children}</main>
