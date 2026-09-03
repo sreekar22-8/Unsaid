@@ -18,3 +18,12 @@ expertMode = true
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 20000
+
+[userenv]
+
+[userenv.shared]
+VITE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_nwvLfMd6JnVjB81gdj2fRw_Wl0xQ2f1"
+VITE_SUPABASE_URL = "https://qxtapvagkqfjgzvrcrmc.supabase.co"
+
+[nix]
+channel = "stable-25_05"

@@ -1,9 +1,12 @@
 import { type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { AuthProvider } from '@/components/auth-provider';
+import { AuthGuard } from '@/components/auth-guard';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
+import { LoginPage, SignupPage } from '@/pages/auth-pages';
 import { ChatPage, CompanionPage, InsightsPage, JournalPage, MemoryPage, SettingsPage } from '@/pages/unsaid-pages';
 import {
   Route,
@@ -20,12 +23,14 @@ function Router() {
     // survives a page crash.
     <RoutedErrorBoundary>
       <Switch>
-         <Route path="/" component={CompanionPage} />
-         <Route path="/chat" component={ChatPage} />
-         <Route path="/journal" component={JournalPage} />
-         <Route path="/insights" component={InsightsPage} />
-         <Route path="/memory" component={MemoryPage} />
-         <Route path="/settings" component={SettingsPage} />
+         <Route path="/login" component={LoginPage} />
+         <Route path="/signup" component={SignupPage} />
+         <Route path="/" component={() => <AuthGuard><CompanionPage /></AuthGuard>} />
+         <Route path="/chat" component={() => <AuthGuard><ChatPage /></AuthGuard>} />
+         <Route path="/journal" component={() => <AuthGuard><JournalPage /></AuthGuard>} />
+         <Route path="/insights" component={() => <AuthGuard><InsightsPage /></AuthGuard>} />
+         <Route path="/memory" component={() => <AuthGuard><MemoryPage /></AuthGuard>} />
+         <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />
         <Route component={NotFound} />
       </Switch>
     </RoutedErrorBoundary>
@@ -41,9 +46,11 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-          <Router />
-        </WouterRouter>
+        <AuthProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+            <Router />
+          </WouterRouter>
+        </AuthProvider>
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

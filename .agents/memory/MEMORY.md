@@ -1,1 +1,2 @@
 - [OpenAPI integer compatibility](api-contract-zod-version.md) — generated Zod currently requires numeric schemas instead of OpenAPI integer types.
+- [Vite Supabase environment variables](vite-supabase-env.md) — VITE-prefixed browser config requires a workflow restart before Vite sees updated values.
