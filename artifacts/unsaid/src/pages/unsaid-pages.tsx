@@ -30,8 +30,8 @@ import { ChatWindow } from '@/components/chat-window';
 const modes: { id: ConversationMode; label: string; hint: string }[] = [
   { id: 'listen', label: 'Listen', hint: 'No fixing. Just room.' },
   { id: 'understand', label: 'Understand', hint: 'Find the thread.' },
-  { id: 'help', label: 'Help me through', hint: 'Small next steps.' },
-  { id: 'private', label: 'Private note', hint: 'Keep it between us.' },
+  { id: 'reframe', label: 'Reframe', hint: 'Look from a new angle.' },
+  { id: 'help', label: 'Help', hint: 'Small next steps.' },
 ];
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -51,7 +51,8 @@ export function CompanionPage() {
   const client = useQueryClient();
   const bootstrap = useGetCompanionBootstrap();
   const conversationsQuery = useListConversations({ query: { queryKey: getListConversationsQueryKey() } });
-  const conversations = conversationsQuery.data ?? bootstrap.data?.conversations ?? [];
+  const rawConversations = conversationsQuery.data ?? bootstrap.data?.conversations;
+  const conversations = Array.isArray(rawConversations) ? rawConversations : [];
   const [activeId, setActiveId] = useState<number | null>(null);
   const [mode, setMode] = useState<ConversationMode>('listen');
   const [draft, setDraft] = useState('');
@@ -68,7 +69,8 @@ export function CompanionPage() {
   }, [conversations, activeId]);
   const activeConversation = conversations.find((item) => item.id === activeId);
   const messagesQuery = useListMessages(activeId ?? 0, { query: { queryKey: getListMessagesQueryKey(activeId ?? 0), enabled: activeId !== null } });
-  const messages = messagesQuery.data ?? (activeId ? (bootstrap.data?.messages ?? []).filter((item) => item.conversationId === activeId) : []);
+  const rawMessages = messagesQuery.data ?? (activeId ? bootstrap.data?.messages : undefined);
+  const messages = Array.isArray(rawMessages) ? (activeId ? rawMessages.filter((item) => item.conversationId === activeId) : rawMessages) : [];
   const startConversation = (requestedMode = mode) => {
     setNotice('');
     createConversation.mutate({ data: { title: requestedMode === 'private' ? 'A private note' : 'A little space', mode: requestedMode } }, {

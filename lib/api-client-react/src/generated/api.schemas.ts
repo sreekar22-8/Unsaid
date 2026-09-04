@@ -15,6 +15,7 @@ export type ConversationMode = typeof ConversationMode[keyof typeof Conversation
 export const ConversationMode = {
   listen: 'listen',
   understand: 'understand',
+  reframe: 'reframe',
   help: 'help',
   private: 'private',
 } as const;
@@ -33,6 +34,7 @@ export type ConversationInputMode = typeof ConversationInputMode[keyof typeof Co
 export const ConversationInputMode = {
   listen: 'listen',
   understand: 'understand',
+  reframe: 'reframe',
   help: 'help',
   private: 'private',
 } as const;
@@ -66,6 +68,7 @@ export type MessageInputMode = typeof MessageInputMode[keyof typeof MessageInput
 export const MessageInputMode = {
   listen: 'listen',
   understand: 'understand',
+  reframe: 'reframe',
   help: 'help',
   private: 'private',
 } as const;

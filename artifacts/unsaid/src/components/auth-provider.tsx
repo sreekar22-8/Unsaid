@@ -24,20 +24,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(({ data }) => {
-      if (!mounted) return;
-      setSession(data.session);
-      setLoading(false);
-    });
+    const timeoutId = setTimeout(() => {
+      if (mounted) {
+        console.warn('Supabase auth session check timed out. Proceeding with default state.');
+        setLoading(false);
+      }
+    }, 3000);
+
+    supabase.auth
+      .getSession()
+      .then(({ data }) => {
+        if (!mounted) return;
+        clearTimeout(timeoutId);
+        setSession(data?.session ?? null);
+        setLoading(false);
+      })
+      .catch((err) => {
+        if (!mounted) return;
+        clearTimeout(timeoutId);
+        console.error('Supabase auth session error:', err);
+        setSession(null);
+        setLoading(false);
+      });
 
     const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       if (!mounted) return;
+      clearTimeout(timeoutId);
       setSession(nextSession);
       setLoading(false);
     });
 
     return () => {
       mounted = false;
+      clearTimeout(timeoutId);
       authListener.subscription.unsubscribe();
     };
   }, []);

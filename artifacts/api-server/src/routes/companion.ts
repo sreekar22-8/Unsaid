@@ -24,9 +24,7 @@ import {
 
 const router: IRouter = Router();
 
-type Mode = "listen" | "understand" | "help" | "private";
-
-const now = () => new Date().toISOString();
+type Mode = "listen" | "understand" | "reframe" | "help" | "private";
 
 function conversationView(row: typeof conversationsTable.$inferSelect) {
   return { ...row, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
@@ -53,22 +51,29 @@ function emotionFor(text: string) {
   return "uncertain";
 }
 
+export const SYSTEM_PROMPTS: Record<Mode, string> = {
+  listen: "You are a warm, empathetic listener. Reflect and validate feelings gently. NEVER give advice or action steps. Do not attempt to fix or solve the situation.",
+  understand: "You are a reflective companion helping the user name and explore complex internal experiences. Ask ONE gentle clarifying question at a time to help name mixed emotions. Do not rush to give advice.",
+  reframe: "You are a gentle cognitive reframing companion. Help the user see a regret or mistake from a different angle — what they learned, what was actually in their control, how they'd advise a friend in the same situation, and one thing they did right. NEVER suggest 'just forget about it' — the goal is processing, not suppression.",
+  help: "You are a supportive, practical guide for taking manageable next steps. Give 2 to 3 concrete, realistic, small next-step suggestions.",
+  private: "Reflect gently without storing long-term memory.",
+};
+
 function replyFor(mode: Mode, text: string) {
   const emotion = emotionFor(text);
-  const prefix = mode === "private"
-    ? "This can stay unshared here. "
-    : mode === "listen"
-      ? "I’m here with you. "
-      : mode === "understand"
-        ? "There may be more than one thing happening at once. "
-        : "Let’s find one small next step together. ";
-  const endings: Record<Mode, string> = {
-    listen: "You don’t have to make it neat before you say it.",
-    understand: "What part feels hardest to name right now?",
-    help: "Would it help to think through what you want to say, or what you need for yourself first?",
-    private: "You can leave it unfinished if that is the most honest place to leave it.",
-  };
-  return `${prefix}I’m hearing something ${emotion} underneath this. ${endings[mode]}`;
+  if (mode === "listen") {
+    return `I hear how much weight is sitting underneath this ${emotion} feeling. It makes total sense that you feel this way, and you don't have to fix or make it neat right now.`;
+  }
+  if (mode === "understand") {
+    return `It sounds like ${emotion} might be sharing space with something else you haven't fully named yet. If you look closely at what's happening, what single part feels hardest to speak out loud right now?`;
+  }
+  if (mode === "reframe") {
+    return `Carrying regret around this can feel heavy. Looking at this with compassion: what was actually within your control, how would you advise a dear friend in your exact shoes, and what is one thing you handled right?`;
+  }
+  if (mode === "help") {
+    return `Here are 2 concrete, realistic small next steps we can take together:\n1. Take a 5-minute pause without forcing yourself to solve the whole picture.\n2. Identify the single smallest action within your reach today. Would you like to talk through that step first?`;
+  }
+  return `This can stay unshared here. You can leave it unfinished if that is the most honest place to leave it.`;
 }
 
 async function ensureSeed() {
@@ -322,6 +327,51 @@ async function buildDashboard(conversationCount?: number, journalCount?: number,
     weeklyIntensity: ["M", "T", "W", "T", "F", "S", "S"].map((day, index) => ({ day, value: [0.42, 0.61, 0.48, 0.76, 0.57, 0.36, 0.29][index] })),
   };
 }
+
+router.post("/chat", async (req, res, next) => {
+  try {
+    const { content, conversationId: reqId, mode: requestedMode } = req.body ?? {};
+    let conversationId = reqId ? Number(reqId) : null;
+    let conversation;
+    if (conversationId) {
+      [conversation] = await db.select().from(conversationsTable).where(eq(conversationsTable.id, conversationId)).limit(1);
+    }
+    if (!conversation) {
+      [conversation] = await db.insert(conversationsTable).values({
+        title: (content || "A new conversation").slice(0, 34),
+        mode: requestedMode || "listen",
+      }).returning();
+      conversationId = conversation.id;
+    }
+    const mode = (requestedMode || conversation.mode || "listen") as Mode;
+    const userEmotion = emotionFor(content || "");
+    const [userMessage] = await db.insert(messagesTable).values({
+      conversationId,
+      role: "user",
+      content: content || "",
+      emotion: userEmotion,
+    }).returning();
+
+    const replyContent = replyFor(mode, content || "");
+    const [assistantMessage] = await db.insert(messagesTable).values({
+      conversationId,
+      role: "assistant",
+      content: replyContent,
+      emotion: userEmotion,
+    }).returning();
+
+    await db.update(conversationsTable).set({ mode, updatedAt: new Date() }).where(eq(conversationsTable.id, conversationId));
+
+    res.json({
+      conversationId,
+      userMessage: messageView(userMessage),
+      assistantMessage: messageView(assistantMessage),
+      messages: [messageView(userMessage), messageView(assistantMessage)],
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 router.get("/companion/dashboard", async (_req, res, next) => {
   try {

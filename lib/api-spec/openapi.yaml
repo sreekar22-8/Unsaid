@@ -271,14 +271,14 @@ components:
       properties:
         id: { type: number }
         title: { type: string }
-        mode: { type: string, enum: [listen, understand, help, private] }
+        mode: { type: string, enum: [listen, understand, reframe, help, private] }
         createdAt: { type: string }
         updatedAt: { type: string }
     ConversationInput:
       type: object
       properties:
         title: { type: string }
-        mode: { type: string, enum: [listen, understand, help, private] }
+        mode: { type: string, enum: [listen, understand, reframe, help, private] }
     Message:
       type: object
       required: [id, conversationId, role, content, createdAt]
@@ -294,7 +294,7 @@ components:
       required: [content]
       properties:
         content: { type: string, minLength: 1 }
-        mode: { type: string, enum: [listen, understand, help, private] }
+        mode: { type: string, enum: [listen, understand, reframe, help, private] }
     EmotionDetectionInput:
       type: object
       required: [content]

@@ -12,6 +12,7 @@ export type MessageInputMode = typeof MessageInputMode[keyof typeof MessageInput
 export const MessageInputMode = {
   listen: 'listen',
   understand: 'understand',
+  reframe: 'reframe',
   help: 'help',
   private: 'private',
 } as const;

@@ -12,6 +12,7 @@ export type ConversationInputMode = typeof ConversationInputMode[keyof typeof Co
 export const ConversationInputMode = {
   listen: 'listen',
   understand: 'understand',
+  reframe: 'reframe',
   help: 'help',
   private: 'private',
 } as const;

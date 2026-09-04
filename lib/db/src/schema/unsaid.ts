@@ -12,6 +12,7 @@ import { z } from "zod/v4";
 
 export const conversationsTable = pgTable("unsaid_conversations", {
   id: serial("id").primaryKey(),
+  userId: text("user_id"),
   title: text("title").notNull(),
   mode: text("mode").notNull().default("listen"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -23,6 +24,7 @@ export const messagesTable = pgTable("unsaid_messages", {
   conversationId: integer("conversation_id")
     .notNull()
     .references(() => conversationsTable.id, { onDelete: "cascade" }),
+  userId: text("user_id"),
   role: text("role").notNull(),
   content: text("content").notNull(),
   emotion: text("emotion"),

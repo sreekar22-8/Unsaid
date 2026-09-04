@@ -12,6 +12,7 @@ export type ConversationMode = typeof ConversationMode[keyof typeof Conversation
 export const ConversationMode = {
   listen: 'listen',
   understand: 'understand',
+  reframe: 'reframe',
   help: 'help',
   private: 'private',
 } as const;

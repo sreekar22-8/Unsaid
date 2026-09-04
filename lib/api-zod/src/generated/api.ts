@@ -24,7 +24,7 @@ export const GetCompanionBootstrapResponse = zod.object({
   "conversations": zod.array(zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "mode": zod.enum(['listen', 'understand', 'help', 'private']),
+  "mode": zod.enum(['listen', 'understand', 'reframe', 'help', 'private']),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })),
@@ -76,7 +76,7 @@ export const GetCompanionBootstrapResponse = zod.object({
 export const ListConversationsResponseItem = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "mode": zod.enum(['listen', 'understand', 'help', 'private']),
+  "mode": zod.enum(['listen', 'understand', 'reframe', 'help', 'private']),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })
@@ -88,13 +88,13 @@ export const ListConversationsResponse = zod.array(ListConversationsResponseItem
  */
 export const CreateConversationBody = zod.object({
   "title": zod.string().optional(),
-  "mode": zod.enum(['listen', 'understand', 'help', 'private']).optional()
+  "mode": zod.enum(['listen', 'understand', 'reframe', 'help', 'private']).optional()
 })
 
 export const CreateConversationResponse = zod.object({
   "id": zod.number(),
   "title": zod.string(),
-  "mode": zod.enum(['listen', 'understand', 'help', 'private']),
+  "mode": zod.enum(['listen', 'understand', 'reframe', 'help', 'private']),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
 })
@@ -130,7 +130,7 @@ export const SendMessageParams = zod.object({
 
 export const SendMessageBody = zod.object({
   "content": zod.string().min(1),
-  "mode": zod.enum(['listen', 'understand', 'help', 'private']).optional()
+  "mode": zod.enum(['listen', 'understand', 'reframe', 'help', 'private']).optional()
 })
 
 export const SendMessageResponseItem = zod.object({
