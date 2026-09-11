@@ -237,6 +237,47 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DashboardSummary"
+  /companion/private-notes:
+    get:
+      operationId: listPrivateNotes
+      tags: [companion]
+      summary: List private notes
+      responses:
+        "200":
+          description: Private notes
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PrivateNote"
+    post:
+      operationId: createPrivateNote
+      tags: [companion]
+      summary: Create a private note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PrivateNoteInput"
+      responses:
+        "201":
+          description: Created private note
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PrivateNote"
+  /companion/private-notes/{noteId}:
+    delete:
+      operationId: deletePrivateNote
+      tags: [companion]
+      summary: Delete a private note
+      parameters:
+        - $ref: "#/components/parameters/NoteId"
+      responses:
+        "204":
+          description: Deleted
 components:
   parameters:
     ConversationId:
@@ -253,6 +294,12 @@ components:
         type: number
     MemoryId:
       name: memoryId
+      in: path
+      required: true
+      schema:
+        type: number
+    NoteId:
+      name: noteId
       in: path
       required: true
       schema:
@@ -311,12 +358,14 @@ components:
         reflection: { type: string }
     JournalEntry:
       type: object
-      required: [id, title, content, mood, createdAt, updatedAt]
+      required: [id, content, createdAt]
       properties:
         id: { type: number }
         title: { type: string }
         content: { type: string }
         mood: { type: string }
+        moodTag: { type: ["string", "null"] }
+        entryType: { type: string, enum: [open, guided] }
         createdAt: { type: string }
         updatedAt: { type: string }
     JournalEntryInput:
@@ -326,12 +375,16 @@ components:
         title: { type: string }
         content: { type: string, minLength: 1 }
         mood: { type: string }
+        moodTag: { type: string }
+        entryType: { type: string, enum: [open, guided] }
     JournalEntryUpdate:
       type: object
       properties:
         title: { type: string }
         content: { type: string, minLength: 1 }
         mood: { type: string }
+        moodTag: { type: string }
+        entryType: { type: string, enum: [open, guided] }
     Memory:
       type: object
       required: [id, label, detail, enabled, createdAt]
@@ -385,4 +438,20 @@ components:
         memoryEnabled: { type: boolean }
         dashboard: { $ref: "#/components/schemas/DashboardSummary" }
         journalEntries: { type: array, items: { $ref: "#/components/schemas/JournalEntry" } }
+    PrivateNote:
+      type: object
+      required: [id, content, isLetter, createdAt]
+      properties:
+        id: { type: number }
+        content: { type: string }
+        isLetter: { type: boolean }
+        createdAt: { type: string }
+        expiresAt: { type: ["string", "null"] }
+    PrivateNoteInput:
+      type: object
+      required: [content]
+      properties:
+        content: { type: string, minLength: 1 }
+        isLetter: { type: boolean }
+        expiresAt: { type: string }
 

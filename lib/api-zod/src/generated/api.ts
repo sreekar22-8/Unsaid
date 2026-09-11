@@ -61,11 +61,13 @@ export const GetCompanionBootstrapResponse = zod.object({
 }),
   "journalEntries": zod.array(zod.object({
   "id": zod.number(),
-  "title": zod.string(),
+  "title": zod.string().optional(),
   "content": zod.string(),
-  "mood": zod.string(),
+  "mood": zod.string().optional(),
+  "moodTag": zod.string().nullish(),
+  "entryType": zod.enum(['open', 'guided']).optional(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string().optional()
 }))
 })
 
@@ -168,11 +170,13 @@ export const DetectEmotionResponse = zod.object({
  */
 export const ListJournalEntriesResponseItem = zod.object({
   "id": zod.number(),
-  "title": zod.string(),
+  "title": zod.string().optional(),
   "content": zod.string(),
-  "mood": zod.string(),
+  "mood": zod.string().optional(),
+  "moodTag": zod.string().nullish(),
+  "entryType": zod.enum(['open', 'guided']).optional(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string().optional()
 })
 export const ListJournalEntriesResponse = zod.array(ListJournalEntriesResponseItem)
 
@@ -186,16 +190,20 @@ export const ListJournalEntriesResponse = zod.array(ListJournalEntriesResponseIt
 export const CreateJournalEntryBody = zod.object({
   "title": zod.string().optional(),
   "content": zod.string().min(1),
-  "mood": zod.string().optional()
+  "mood": zod.string().optional(),
+  "moodTag": zod.string().optional(),
+  "entryType": zod.enum(['open', 'guided']).optional()
 })
 
 export const CreateJournalEntryResponse = zod.object({
   "id": zod.number(),
-  "title": zod.string(),
+  "title": zod.string().optional(),
   "content": zod.string(),
-  "mood": zod.string(),
+  "mood": zod.string().optional(),
+  "moodTag": zod.string().nullish(),
+  "entryType": zod.enum(['open', 'guided']).optional(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string().optional()
 })
 
 
@@ -212,16 +220,20 @@ export const UpdateJournalEntryParams = zod.object({
 export const UpdateJournalEntryBody = zod.object({
   "title": zod.string().optional(),
   "content": zod.string().min(1).optional(),
-  "mood": zod.string().optional()
+  "mood": zod.string().optional(),
+  "moodTag": zod.string().optional(),
+  "entryType": zod.enum(['open', 'guided']).optional()
 })
 
 export const UpdateJournalEntryResponse = zod.object({
   "id": zod.number(),
-  "title": zod.string(),
+  "title": zod.string().optional(),
   "content": zod.string(),
-  "mood": zod.string(),
+  "mood": zod.string().optional(),
+  "moodTag": zod.string().nullish(),
+  "entryType": zod.enum(['open', 'guided']).optional(),
   "createdAt": zod.string(),
-  "updatedAt": zod.string()
+  "updatedAt": zod.string().optional()
 })
 
 
@@ -288,5 +300,49 @@ export const GetDashboardSummaryResponse = zod.object({
   "value": zod.number()
 }))
 })
+
+
+/**
+ * @summary List private notes
+ */
+export const ListPrivateNotesResponseItem = zod.object({
+  "id": zod.number(),
+  "content": zod.string(),
+  "isLetter": zod.boolean(),
+  "createdAt": zod.string(),
+  "expiresAt": zod.string().nullish()
+})
+export const ListPrivateNotesResponse = zod.array(ListPrivateNotesResponseItem)
+
+
+/**
+ * @summary Create a private note
+ */
+
+
+
+export const CreatePrivateNoteBody = zod.object({
+  "content": zod.string().min(1),
+  "isLetter": zod.boolean().optional(),
+  "expiresAt": zod.string().optional()
+})
+
+export const CreatePrivateNoteResponse = zod.object({
+  "id": zod.number(),
+  "content": zod.string(),
+  "isLetter": zod.boolean(),
+  "createdAt": zod.string(),
+  "expiresAt": zod.string().nullish()
+})
+
+
+/**
+ * @summary Delete a private note
+ */
+export const DeletePrivateNoteParams = zod.object({
+  "noteId": zod.coerce.number()
+})
+
+export const DeletePrivateNoteResponse = zod.void()
 
 

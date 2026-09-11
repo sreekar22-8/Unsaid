@@ -5,10 +5,13 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { JournalEntryUpdateEntryType } from './journalEntryUpdateEntryType';
 
 export interface JournalEntryUpdate {
   title?: string;
   /** @minLength 1 */
   content?: string;
   mood?: string;
+  moodTag?: string;
+  entryType?: JournalEntryUpdateEntryType;
 }

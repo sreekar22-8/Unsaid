@@ -33,9 +33,12 @@ export const messagesTable = pgTable("unsaid_messages", {
 
 export const journalEntriesTable = pgTable("unsaid_journal_entries", {
   id: serial("id").primaryKey(),
+  userId: text("user_id"),
   title: text("title").notNull().default("Untitled reflection"),
   content: text("content").notNull(),
   mood: text("mood").notNull().default("Unmarked"),
+  moodTag: text("mood_tag"),
+  entryType: text("entry_type").notNull().default("open"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
@@ -52,6 +55,15 @@ export const settingsTable = pgTable("unsaid_settings", {
   id: serial("id").primaryKey(),
   memoryEnabled: boolean("memory_enabled").notNull().default(true),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const privateNotesTable = pgTable("unsaid_private_notes", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id"),
+  content: text("content").notNull(),
+  isLetter: boolean("is_letter").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at"),
 });
 
 export const insertConversationSchema = createInsertSchema(conversationsTable).omit({
@@ -76,12 +88,18 @@ export const insertSettingsSchema = createInsertSchema(settingsTable).omit({
   id: true,
   updatedAt: true,
 });
+export const insertPrivateNoteSchema = createInsertSchema(privateNotesTable).omit({
+  id: true,
+  createdAt: true,
+});
 
 export type Conversation = typeof conversationsTable.$inferSelect;
 export type Message = typeof messagesTable.$inferSelect;
 export type JournalEntry = typeof journalEntriesTable.$inferSelect;
 export type Memory = typeof memoriesTable.$inferSelect;
 export type Settings = typeof settingsTable.$inferSelect;
+export type PrivateNote = typeof privateNotesTable.$inferSelect;
 export type ConversationInput = z.infer<typeof insertConversationSchema>;
 export type MessageInput = z.infer<typeof insertMessageSchema>;
 export type JournalEntryInput = z.infer<typeof insertJournalEntrySchema>;
+export type PrivateNoteInput = z.infer<typeof insertPrivateNoteSchema>;

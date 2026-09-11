@@ -8,7 +8,8 @@ const navItems = [
   { href: '/insights', label: 'Insights', icon: Brain },
 ];
 const secondaryItems = [
-  { href: '/memory', label: 'Memory', icon: LockKeyhole },
+  { href: '/private', label: 'Private vault', icon: LockKeyhole },
+  { href: '/memory', label: 'Memory', icon: Sparkles },
   { href: '/settings', label: 'Settings', icon: Settings },
 ];
 const topNavItems = [

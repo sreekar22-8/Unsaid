@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { LoginPage, SignupPage } from '@/pages/auth-pages';
 import { ChatPage, CompanionPage, InsightsPage, JournalPage, MemoryPage, SettingsPage } from '@/pages/unsaid-pages';
+import { PrivateNotesPage } from '@/pages/private-notes-page';
 import {
   Route,
   Switch,
@@ -29,6 +30,7 @@ function Router() {
          <Route path="/chat" component={() => <AuthGuard><ChatPage /></AuthGuard>} />
          <Route path="/journal" component={() => <AuthGuard><JournalPage /></AuthGuard>} />
          <Route path="/insights" component={() => <AuthGuard><InsightsPage /></AuthGuard>} />
+         <Route path="/private" component={() => <AuthGuard><PrivateNotesPage /></AuthGuard>} />
          <Route path="/memory" component={() => <AuthGuard><MemoryPage /></AuthGuard>} />
          <Route path="/settings" component={() => <AuthGuard><SettingsPage /></AuthGuard>} />
         <Route component={NotFound} />

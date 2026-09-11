@@ -92,27 +92,58 @@ export interface EmotionDetection {
   reflection: string;
 }
 
+export type JournalEntryEntryType = typeof JournalEntryEntryType[keyof typeof JournalEntryEntryType];
+
+
+export const JournalEntryEntryType = {
+  open: 'open',
+  guided: 'guided',
+} as const;
+
 export interface JournalEntry {
   id: number;
-  title: string;
+  title?: string;
   content: string;
-  mood: string;
+  mood?: string;
+  /** @nullable */
+  moodTag?: string | null;
+  entryType?: JournalEntryEntryType;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
+
+export type JournalEntryInputEntryType = typeof JournalEntryInputEntryType[keyof typeof JournalEntryInputEntryType];
+
+
+export const JournalEntryInputEntryType = {
+  open: 'open',
+  guided: 'guided',
+} as const;
 
 export interface JournalEntryInput {
   title?: string;
   /** @minLength 1 */
   content: string;
   mood?: string;
+  moodTag?: string;
+  entryType?: JournalEntryInputEntryType;
 }
+
+export type JournalEntryUpdateEntryType = typeof JournalEntryUpdateEntryType[keyof typeof JournalEntryUpdateEntryType];
+
+
+export const JournalEntryUpdateEntryType = {
+  open: 'open',
+  guided: 'guided',
+} as const;
 
 export interface JournalEntryUpdate {
   title?: string;
   /** @minLength 1 */
   content?: string;
   mood?: string;
+  moodTag?: string;
+  entryType?: JournalEntryUpdateEntryType;
 }
 
 export interface Memory {
@@ -154,5 +185,21 @@ export interface CompanionBootstrap {
   memoryEnabled: boolean;
   dashboard: DashboardSummary;
   journalEntries: JournalEntry[];
+}
+
+export interface PrivateNote {
+  id: number;
+  content: string;
+  isLetter: boolean;
+  createdAt: string;
+  /** @nullable */
+  expiresAt?: string | null;
+}
+
+export interface PrivateNoteInput {
+  /** @minLength 1 */
+  content: string;
+  isLetter?: boolean;
+  expiresAt?: string;
 }
 

@@ -146,7 +146,8 @@ function JournalEditor({ entry, onClose, onSaved }: { entry?: JournalEntry; onCl
 export function JournalPage() {
   const bootstrap = useGetCompanionBootstrap();
   const query = useListJournalEntries({ query: { queryKey: getListJournalEntriesQueryKey() } });
-  const entries = query.data ?? bootstrap.data?.journalEntries ?? [];
+  const rawEntries = query.data ?? bootstrap.data?.journalEntries;
+  const entries = Array.isArray(rawEntries) ? rawEntries : [];
   const [editorOpen, setEditorOpen] = useState(false);
   const [editing, setEditing] = useState<JournalEntry | undefined>();
   const deleteEntry = useDeleteJournalEntry();
@@ -167,7 +168,8 @@ export function MemoryPage() {
   const client = useQueryClient();
   const bootstrap = useGetCompanionBootstrap();
   const query = useListMemories({ query: { queryKey: getListMemoriesQueryKey() } });
-  const memories = query.data ?? bootstrap.data?.memories ?? [];
+  const rawMemories = query.data ?? bootstrap.data?.memories;
+  const memories = Array.isArray(rawMemories) ? rawMemories : [];
   const [enabled, setEnabled] = useState(bootstrap.data?.memoryEnabled ?? true);
   useEffect(() => { if (bootstrap.data) setEnabled(bootstrap.data.memoryEnabled); }, [bootstrap.data]);
   const update = useUpdateMemorySettings();

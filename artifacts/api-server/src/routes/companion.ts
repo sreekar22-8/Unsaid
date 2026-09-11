@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
 import {
   CreateConversationBody,
   CreateJournalEntryBody,
@@ -19,6 +19,7 @@ import {
   journalEntriesTable,
   memoriesTable,
   messagesTable,
+  privateNotesTable,
   settingsTable,
 } from "@workspace/db/schema";
 
@@ -35,11 +36,25 @@ function messageView(row: typeof messagesTable.$inferSelect) {
 }
 
 function journalView(row: typeof journalEntriesTable.$inferSelect) {
-  return { ...row, createdAt: row.createdAt.toISOString(), updatedAt: row.updatedAt.toISOString() };
+  return {
+    ...row,
+    moodTag: row.moodTag ?? row.mood ?? "Reflective",
+    entryType: row.entryType ?? "open",
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  };
 }
 
 function memoryView(row: typeof memoriesTable.$inferSelect) {
   return { ...row, createdAt: row.createdAt.toISOString() };
+}
+
+function privateNoteView(row: typeof privateNotesTable.$inferSelect) {
+  return {
+    ...row,
+    createdAt: row.createdAt.toISOString(),
+    expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+  };
 }
 
 function emotionFor(text: string) {
@@ -229,10 +244,15 @@ router.get("/companion/journal", async (_req, res, next) => {
 router.post("/companion/journal", async (req, res, next) => {
   try {
     const input = CreateJournalEntryBody.parse(req.body);
+    const rawDetected = emotionFor(input.content);
+    const autoMood = rawDetected.charAt(0).toUpperCase() + rawDetected.slice(1);
+    const finalMood = input.moodTag || input.mood || autoMood;
     const [row] = await db.insert(journalEntriesTable).values({
-      title: input.title || "Untitled reflection",
+      title: input.title || (input.entryType === "guided" ? "Guided Reflection" : "Open Reflection"),
       content: input.content,
-      mood: input.mood || "Unmarked",
+      mood: finalMood,
+      moodTag: finalMood,
+      entryType: input.entryType || "open",
     }).returning();
     res.status(201).json(journalView(row));
   } catch (error) {
@@ -244,10 +264,12 @@ router.patch("/companion/journal/:entryId", async (req, res, next) => {
   try {
     const { entryId } = UpdateJournalEntryParams.parse({ entryId: Number(req.params.entryId) });
     const input = UpdateJournalEntryBody.parse(req.body);
+    const finalMood = input.moodTag ?? input.mood;
     const [row] = await db.update(journalEntriesTable).set({
       ...(input.title === undefined ? {} : { title: input.title }),
       ...(input.content === undefined ? {} : { content: input.content }),
-      ...(input.mood === undefined ? {} : { mood: input.mood }),
+      ...(finalMood === undefined ? {} : { mood: finalMood, moodTag: finalMood }),
+      ...(input.entryType === undefined ? {} : { entryType: input.entryType }),
       updatedAt: new Date(),
     }).where(eq(journalEntriesTable.id, entryId)).returning();
     if (!row) {
@@ -368,6 +390,43 @@ router.post("/chat", async (req, res, next) => {
       assistantMessage: messageView(assistantMessage),
       messages: [messageView(userMessage), messageView(assistantMessage)],
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/companion/private-notes", async (_req, res, next) => {
+  try {
+    const rows = await db
+      .select()
+      .from(privateNotesTable)
+      .where(or(isNull(privateNotesTable.expiresAt), gt(privateNotesTable.expiresAt, new Date())))
+      .orderBy(desc(privateNotesTable.createdAt));
+    res.json(rows.map(privateNoteView));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/companion/private-notes", async (req, res, next) => {
+  try {
+    const { content, isLetter, expiresAt } = req.body ?? {};
+    const [row] = await db.insert(privateNotesTable).values({
+      content: content || "",
+      isLetter: Boolean(isLetter),
+      expiresAt: expiresAt ? new Date(expiresAt) : null,
+    }).returning();
+    res.status(201).json(privateNoteView(row));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/companion/private-notes/:noteId", async (req, res, next) => {
+  try {
+    const noteId = Number(req.params.noteId);
+    await db.delete(privateNotesTable).where(eq(privateNotesTable.id, noteId));
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

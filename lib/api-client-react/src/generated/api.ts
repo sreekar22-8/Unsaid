@@ -33,7 +33,9 @@ import type {
   Memory,
   MemorySettings,
   Message,
-  MessageInput
+  MessageInput,
+  PrivateNote,
+  PrivateNoteInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -1172,4 +1174,223 @@ export function useGetDashboardSummary<TData = Awaited<ReturnType<typeof getDash
 
 
 
+
+export const getListPrivateNotesUrl = () => {
+
+
+
+
+  return `/api/companion/private-notes`
+}
+
+/**
+ * @summary List private notes
+ */
+export const listPrivateNotes = async ( options?: Parameters<typeof customFetch>[1]): Promise<PrivateNote[]> => {
+
+  return customFetch<PrivateNote[]>(getListPrivateNotesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getListPrivateNotesQueryKey = () => {
+    return [
+    `/api/companion/private-notes`
+    ] as const;
+    }
+
+
+export const getListPrivateNotesQueryOptions = <TData = Awaited<ReturnType<typeof listPrivateNotes>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPrivateNotes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getListPrivateNotesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof listPrivateNotes>>> = ({ signal }) => listPrivateNotes({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listPrivateNotes>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type ListPrivateNotesQueryResult = NonNullable<Awaited<ReturnType<typeof listPrivateNotes>>>
+export type ListPrivateNotesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List private notes
+ */
+
+export function useListPrivateNotes<TData = Awaited<ReturnType<typeof listPrivateNotes>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof listPrivateNotes>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getListPrivateNotesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreatePrivateNoteUrl = () => {
+
+
+
+
+  return `/api/companion/private-notes`
+}
+
+/**
+ * @summary Create a private note
+ */
+export const createPrivateNote = async (privateNoteInput: PrivateNoteInput, options?: Parameters<typeof customFetch>[1]): Promise<PrivateNote> => {
+
+  return customFetch<PrivateNote>(getCreatePrivateNoteUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(privateNoteInput)
+  }
+);}
+
+
+
+
+
+export const getCreatePrivateNoteMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPrivateNote>>, TError,{data: BodyType<PrivateNoteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createPrivateNote>>, TError,{data: BodyType<PrivateNoteInput>}, TContext> => {
+
+const mutationKey = ['createPrivateNote'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createPrivateNote>>, {data: BodyType<PrivateNoteInput>}> = (props) => {
+          const {data} = props ?? {};
+
+          return  createPrivateNote(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreatePrivateNoteMutationResult = NonNullable<Awaited<ReturnType<typeof createPrivateNote>>>
+    export type CreatePrivateNoteMutationBody = BodyType<PrivateNoteInput>
+    export type CreatePrivateNoteMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Create a private note
+ */
+export const useCreatePrivateNote = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPrivateNote>>, TError,{data: BodyType<PrivateNoteInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createPrivateNote>>,
+        TError,
+        {data: BodyType<PrivateNoteInput>},
+        TContext
+      > => {
+      return useMutation(getCreatePrivateNoteMutationOptions(options));
+    }
+
+export const getDeletePrivateNoteUrl = (noteId: number,) => {
+
+
+
+
+  return `/api/companion/private-notes/${noteId}`
+}
+
+/**
+ * @summary Delete a private note
+ */
+export const deletePrivateNote = async (noteId: number, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeletePrivateNoteUrl(noteId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeletePrivateNoteMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePrivateNote>>, TError,{noteId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deletePrivateNote>>, TError,{noteId: number}, TContext> => {
+
+const mutationKey = ['deletePrivateNote'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deletePrivateNote>>, {noteId: number}> = (props) => {
+          const {noteId} = props ?? {};
+
+          return  deletePrivateNote(noteId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeletePrivateNoteMutationResult = NonNullable<Awaited<ReturnType<typeof deletePrivateNote>>>
+
+    export type DeletePrivateNoteMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete a private note
+ */
+export const useDeletePrivateNote = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePrivateNote>>, TError,{noteId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deletePrivateNote>>,
+        TError,
+        {noteId: number},
+        TContext
+      > => {
+      return useMutation(getDeletePrivateNoteMutationOptions(options));
+    }
 
