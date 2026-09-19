@@ -16,12 +16,15 @@ import {
 import { db } from "@workspace/db";
 import {
   conversationsTable,
+  emotionTagsTable,
   journalEntriesTable,
   memoriesTable,
+  memoryItemsTable,
   messagesTable,
   privateNotesTable,
   settingsTable,
 } from "@workspace/db/schema";
+import { extractMemoryFacts } from "../lib/memory-extractor";
 
 const router: IRouter = Router();
 
@@ -208,6 +211,22 @@ router.post("/companion/conversations/:conversationId/messages", async (req, res
     if (requestedMode && requestedMode !== conversation.mode) {
       await db.update(conversationsTable).set({ mode: requestedMode, updatedAt: new Date() }).where(eq(conversationsTable.id, conversationId));
     }
+
+    // AI memory fact suggestion - saved as UNAPPROVED (approved = false)
+    extractMemoryFacts(content, mode)
+      .then(async (facts) => {
+        if (facts.length > 0) {
+          await db.insert(memoryItemsTable).values(
+            facts.map((fact) => ({
+              userId: userMessage.userId || conversation.userId || null,
+              fact,
+              approved: false,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+
     res.json([messageView(userMessage), messageView(assistantMessage)]);
   } catch (error) {
     next(error);
@@ -368,7 +387,7 @@ router.post("/chat", async (req, res, next) => {
     const mode = (requestedMode || conversation.mode || "listen") as Mode;
     const userEmotion = emotionFor(content || "");
     const [userMessage] = await db.insert(messagesTable).values({
-      conversationId,
+      conversationId: conversation.id,
       role: "user",
       content: content || "",
       emotion: userEmotion,
@@ -376,13 +395,28 @@ router.post("/chat", async (req, res, next) => {
 
     const replyContent = replyFor(mode, content || "");
     const [assistantMessage] = await db.insert(messagesTable).values({
-      conversationId,
+      conversationId: conversation.id,
       role: "assistant",
       content: replyContent,
       emotion: userEmotion,
     }).returning();
 
-    await db.update(conversationsTable).set({ mode, updatedAt: new Date() }).where(eq(conversationsTable.id, conversationId));
+    await db.update(conversationsTable).set({ mode, updatedAt: new Date() }).where(eq(conversationsTable.id, conversation.id));
+
+    // AI memory fact suggestion - saved as UNAPPROVED (approved = false)
+    extractMemoryFacts(content || "", mode)
+      .then(async (facts) => {
+        if (facts.length > 0) {
+          await db.insert(memoryItemsTable).values(
+            facts.map((fact) => ({
+              userId: userMessage.userId || null,
+              fact,
+              approved: false,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
 
     res.json({
       conversationId,
@@ -390,6 +424,55 @@ router.post("/chat", async (req, res, next) => {
       assistantMessage: messageView(assistantMessage),
       messages: [messageView(userMessage), messageView(assistantMessage)],
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/companion/memory-items", async (req, res, next) => {
+  try {
+    const userId = req.query.userId ? String(req.query.userId) : null;
+    let query = db.select().from(memoryItemsTable);
+    if (userId) {
+      query = query.where(eq(memoryItemsTable.userId, userId)) as any;
+    }
+    const rows = await query.orderBy(desc(memoryItemsTable.createdAt));
+    res.json(rows.map((row) => ({
+      ...row,
+      createdAt: row.createdAt.toISOString(),
+    })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch("/companion/memory-items/:id/approve", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const { approved = true } = req.body ?? {};
+    const [updated] = await db
+      .update(memoryItemsTable)
+      .set({ approved: Boolean(approved) })
+      .where(eq(memoryItemsTable.id, id))
+      .returning();
+    if (!updated) {
+      res.status(404).json({ error: "Memory item not found" });
+      return;
+    }
+    res.json({
+      ...updated,
+      createdAt: updated.createdAt.toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/companion/memory-items/:id", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    await db.delete(memoryItemsTable).where(eq(memoryItemsTable.id, id));
+    res.status(204).end();
   } catch (error) {
     next(error);
   }

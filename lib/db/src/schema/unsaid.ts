@@ -4,6 +4,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  real,
   serial,
   text,
   timestamp,
@@ -66,6 +67,23 @@ export const privateNotesTable = pgTable("unsaid_private_notes", {
   expiresAt: timestamp("expires_at"),
 });
 
+export const emotionTagsTable = pgTable("emotion_tags", {
+  id: serial("id").primaryKey(),
+  messageId: integer("message_id").references(() => messagesTable.id, { onDelete: "cascade" }),
+  userId: text("user_id"),
+  emotion: text("emotion").notNull(),
+  intensity: real("intensity").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const memoryItemsTable = pgTable("memory_items", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id"),
+  fact: text("fact").notNull(),
+  approved: boolean("approved").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const insertConversationSchema = createInsertSchema(conversationsTable).omit({
   id: true,
   createdAt: true,
@@ -92,6 +110,14 @@ export const insertPrivateNoteSchema = createInsertSchema(privateNotesTable).omi
   id: true,
   createdAt: true,
 });
+export const insertEmotionTagSchema = createInsertSchema(emotionTagsTable).omit({
+  id: true,
+  createdAt: true,
+});
+export const insertMemoryItemSchema = createInsertSchema(memoryItemsTable).omit({
+  id: true,
+  createdAt: true,
+});
 
 export type Conversation = typeof conversationsTable.$inferSelect;
 export type Message = typeof messagesTable.$inferSelect;
@@ -99,7 +125,11 @@ export type JournalEntry = typeof journalEntriesTable.$inferSelect;
 export type Memory = typeof memoriesTable.$inferSelect;
 export type Settings = typeof settingsTable.$inferSelect;
 export type PrivateNote = typeof privateNotesTable.$inferSelect;
+export type EmotionTag = typeof emotionTagsTable.$inferSelect;
+export type MemoryItem = typeof memoryItemsTable.$inferSelect;
 export type ConversationInput = z.infer<typeof insertConversationSchema>;
 export type MessageInput = z.infer<typeof insertMessageSchema>;
 export type JournalEntryInput = z.infer<typeof insertJournalEntrySchema>;
 export type PrivateNoteInput = z.infer<typeof insertPrivateNoteSchema>;
+export type EmotionTagInput = z.infer<typeof insertEmotionTagSchema>;
+export type MemoryItemInput = z.infer<typeof insertMemoryItemSchema>;

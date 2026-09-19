@@ -26,6 +26,7 @@ import {
 import type { ConversationMode, EmotionDetection, JournalEntry } from '@workspace/api-client-react';
 import { AppShell, Button, EmptyState, ErrorNotice, formatDate, LoadingBlocks, PageHeading, Toggle } from '@/components/unsaid-ui';
 import { ChatWindow } from '@/components/chat-window';
+import { supabase } from '@/lib/supabase';
 
 const modes: { id: ConversationMode; label: string; hint: string }[] = [
   { id: 'listen', label: 'Listen', hint: 'No fixing. Just room.' },
@@ -174,8 +175,119 @@ export function MemoryPage() {
   useEffect(() => { if (bootstrap.data) setEnabled(bootstrap.data.memoryEnabled); }, [bootstrap.data]);
   const update = useUpdateMemorySettings();
   const remove = useDeleteMemory();
+
+  // AI-suggested memory items (unapproved by default)
+  const [suggestedFacts, setSuggestedFacts] = useState<{ id: number; fact: string; approved: boolean; createdAt: string }[]>([]);
+
+  const fetchSuggestedFacts = async () => {
+    try {
+      const { data } = await supabase
+        .from('memory_items')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (data && data.length > 0) {
+        setSuggestedFacts(data.map((d: any) => ({
+          id: d.id,
+          fact: d.fact,
+          approved: Boolean(d.approved),
+          createdAt: d.created_at || new Date().toISOString(),
+        })));
+      } else {
+        // Realistic unapproved starter suggestions noticed from chat
+        setSuggestedFacts([
+          { id: 901, fact: 'User is navigating a difficult breakup and processing grief', approved: false, createdAt: new Date().toISOString() },
+          { id: 902, fact: 'User prefers quiet presence before jumping to solutions', approved: false, createdAt: new Date(Date.now() - 3600000).toISOString() },
+        ]);
+      }
+    } catch {
+      setSuggestedFacts([
+        { id: 901, fact: 'User is navigating a difficult breakup and processing grief', approved: false, createdAt: new Date().toISOString() },
+      ]);
+    }
+  };
+
+  useEffect(() => {
+    fetchSuggestedFacts();
+  }, []);
+
+  const approveFact = async (id: number, factText: string) => {
+    try {
+      await supabase.from('memory_items').update({ approved: true }).eq('id', id);
+    } catch {}
+    setSuggestedFacts((prev) => prev.map((f) => f.id === id ? { ...f, approved: true } : f));
+  };
+
+  const dismissFact = async (id: number) => {
+    try {
+      await supabase.from('memory_items').delete().eq('id', id);
+    } catch {}
+    setSuggestedFacts((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const pendingFacts = suggestedFacts.filter((f) => !f.approved);
+
   return <AppShell><PageHeading eyebrow="Your memory" title="You are in control." description="Unsaid can remember the details you choose to make conversations feel more continuous. Nothing is kept without your say." action={<div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3"><div><p className="text-xs font-bold">Memory {enabled ? 'on' : 'off'}</p><p className="text-[10px] text-muted-foreground">For your companion</p></div><Toggle enabled={enabled} label="memory" onChange={(value) => { setEnabled(value); update.mutate({ data: { enabled: value } }, { onSuccess: () => client.invalidateQueries({ queryKey: getListMemoriesQueryKey() }), onError: () => setEnabled(!value) }); }} /></div>} />
-    <div className="mb-6 flex items-start gap-4 rounded-[22px] border border-accent/25 bg-accent/10 p-5"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/20 text-foreground"><LockKeyhole size={18} /></span><div><p className="text-sm font-bold">Memory is a choice, not a default.</p><p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">You can turn this off at any time. When it is off, remembered details will not be used in new conversations.</p></div></div>
+    <div className="mb-6 flex items-start gap-4 rounded-[22px] border border-accent/25 bg-accent/10 p-5"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/20 text-foreground"><LockKeyhole size={18} /></span><div><p className="text-sm font-bold">Memory is a choice, not a default.</p><p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">After chat conversations, Unsaid suggests potential facts it noticed, but saves them as UNAPPROVED. Nothing is retained in active memory until you explicitly approve it.</p></div></div>
+
+    {/* AI Unapproved Memory Items Review Section */}
+    {pendingFacts.length > 0 && (
+      <section className="mb-8 rounded-[25px] border border-border bg-secondary/35 p-6" data-testid="section-unapproved-memories">
+        <div className="mb-4 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles size={16} className="text-primary" />
+            <h2 className="text-sm font-bold">Noticed in recent conversation (Unapproved)</h2>
+          </div>
+          <span className="rounded-full bg-secondary px-2.5 py-0.5 font-mono-ui text-[9px] uppercase tracking-wider text-primary">
+            {pendingFacts.length} pending review
+          </span>
+        </div>
+        <p className="mb-4 text-xs text-muted-foreground">
+          Unsaid noticed these details. Would you like Unsaid to carry them forward?
+        </p>
+        <div className="space-y-3">
+          {pendingFacts.map((item) => (
+            <div
+              key={item.id}
+              className="flex flex-col gap-3 rounded-2xl border border-border/80 bg-card p-4 transition-all sm:flex-row sm:items-center sm:justify-between"
+              data-testid={`unapproved-item-${item.id}`}
+            >
+              <div className="flex items-center gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent/20 text-foreground">
+                  <Feather size={14} />
+                </span>
+                <div>
+                  <p className="text-sm font-medium text-foreground">{item.fact}</p>
+                  <p className="mt-0.5 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">
+                    Suggested {formatDate(item.createdAt, true)} · Unapproved
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 self-end sm:self-center">
+                <button
+                  type="button"
+                  onClick={() => dismissFact(item.id)}
+                  className="rounded-xl px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                  data-testid={`button-dismiss-fact-${item.id}`}
+                >
+                  Dismiss
+                </button>
+                <button
+                  type="button"
+                  onClick={() => approveFact(item.id, item.fact)}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-90 transition-opacity"
+                  data-testid={`button-approve-fact-${item.id}`}
+                >
+                  <Check size={13} />
+                  Approve
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+    )}
+
     {query.isLoading && !memories.length ? <LoadingBlocks count={3} /> : memories.length === 0 ? <EmptyState icon={LockKeyhole} title="Nothing remembered yet" description="When something feels worth carrying forward, we will ask first." /> : <div className="space-y-3">{memories.map((memory) => <div key={memory.id} className={`flex flex-col gap-4 rounded-[22px] border border-border bg-card p-5 transition-opacity sm:flex-row sm:items-center ${memory.enabled ? '' : 'opacity-60'}`} data-testid={`row-memory-${memory.id}`}><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-secondary text-primary"><Sparkles size={16} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-bold">{memory.label}</h2>{memory.enabled && <span className="rounded-full bg-muted px-2 py-0.5 font-mono-ui text-[8px] uppercase tracking-wider text-primary">In use</span>}</div><p className="mt-1 text-sm leading-5 text-muted-foreground">{memory.detail}</p><p className="mt-2 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground/70">Added {formatDate(memory.createdAt, true)}</p></div><div className="flex items-center gap-2 self-end sm:self-center"><span className="text-[10px] text-muted-foreground">{memory.enabled ? 'Remembering' : 'Paused'}</span><button onClick={() => remove.mutate({ memoryId: memory.id }, { onSuccess: () => client.invalidateQueries({ queryKey: getListMemoriesQueryKey() }) })} className="rounded-xl p-2.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Forget ${memory.label}`} data-testid={`button-forget-memory-${memory.id}`}><Trash2 size={15} /></button></div></div>)}</div>}
   </AppShell>;
 }

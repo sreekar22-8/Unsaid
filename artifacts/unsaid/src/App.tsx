@@ -9,6 +9,7 @@ import NotFound from '@/pages/not-found';
 import { LoginPage, SignupPage } from '@/pages/auth-pages';
 import { ChatPage, CompanionPage, InsightsPage, JournalPage, MemoryPage, SettingsPage } from '@/pages/unsaid-pages';
 import { PrivateNotesPage } from '@/pages/private-notes-page';
+import { DashboardPage } from '@/pages/dashboard-page';
 import {
   Route,
   Switch,
@@ -27,6 +28,7 @@ function Router() {
          <Route path="/login" component={LoginPage} />
          <Route path="/signup" component={SignupPage} />
          <Route path="/" component={() => <AuthGuard><CompanionPage /></AuthGuard>} />
+         <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
          <Route path="/chat" component={() => <AuthGuard><ChatPage /></AuthGuard>} />
          <Route path="/journal" component={() => <AuthGuard><JournalPage /></AuthGuard>} />
          <Route path="/insights" component={() => <AuthGuard><InsightsPage /></AuthGuard>} />

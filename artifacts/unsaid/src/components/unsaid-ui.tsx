@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Link, useLocation } from 'wouter';
-import { BookOpen, Brain, ChevronLeft, ChevronRight, CircleUserRound, Feather, Heart, Home, LockKeyhole, Menu, MoreHorizontal, Settings, Sparkles, X } from 'lucide-react';
+import { Activity, BookOpen, Brain, ChevronLeft, ChevronRight, CircleUserRound, Feather, Heart, Home, LockKeyhole, Menu, MoreHorizontal, Settings, Sparkles, X } from 'lucide-react';
 
 const navItems = [
   { href: '/', label: 'Companion', icon: Home },
+  { href: '/dashboard', label: 'Dashboard', icon: Activity },
   { href: '/journal', label: 'Journal', icon: BookOpen },
   { href: '/insights', label: 'Insights', icon: Brain },
 ];
@@ -15,8 +16,9 @@ const secondaryItems = [
 const topNavItems = [
   { href: '/', label: 'Home' },
   { href: '/chat', label: 'Chat' },
+  { href: '/dashboard', label: 'Dashboard' },
   { href: '/journal', label: 'Journal' },
-  { href: '/insights', label: 'Dashboard' },
+  { href: '/insights', label: 'Insights' },
   { href: '/memory', label: 'Memory' },
 ];
 
