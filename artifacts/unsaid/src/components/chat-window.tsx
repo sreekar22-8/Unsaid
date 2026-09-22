@@ -1,5 +1,10 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useRef, useState, type FormEvent } from 'react';
 import { MessageCircle, Send } from 'lucide-react';
+import {
+  useCreateConversation,
+  useSendMessage,
+} from '@workspace/api-client-react';
+import type { ConversationMode, Message } from '@workspace/api-client-react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,9 +80,8 @@ function EmotionBadge({ tag }: { tag: EmotionTag }) {
 }
 
 // ---------------------------------------------------------------------------
-// Lightweight local emotion classifier (regex heuristic)
-// Replace the return value of this function with real API data once the
-// backend emotion_tags pipeline is wired up.
+// Lightweight local emotion classifier (regex heuristic) — used for user
+// messages locally so badges appear immediately before the API responds.
 // ---------------------------------------------------------------------------
 
 function detectLocalEmotions(text: string): EmotionTag[] {
@@ -111,58 +115,125 @@ function detectLocalEmotions(text: string): EmotionTag[] {
   return tags;
 }
 
+// Convert an API Message to a LocalChatMessage
+function toLocal(msg: Message): LocalChatMessage {
+  return {
+    id: msg.id,
+    role: msg.role as 'user' | 'assistant',
+    content: msg.content,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // ChatWindow
 // ---------------------------------------------------------------------------
 
 export function ChatWindow() {
   const [messages, setMessages] = useState<LocalChatMessage[]>([
-    { id: 1, role: 'assistant', content: 'Take your time. I\u2019m listening.' },
+    { id: 0, role: 'assistant', content: 'Take your time. I\u2019m listening.' },
   ]);
   const [draft, setDraft] = useState('');
-  const [isReplying, setIsReplying] = useState(false);
+  const [error, setError] = useState('');
+  const [conversationId, setConversationId] = useState<number | null>(null);
   const messageListRef = useRef<HTMLDivElement>(null);
-  const replyTimerRef = useRef<number | null>(null);
 
-  useEffect(() => {
-    const list = messageListRef.current;
-    if (list) list.scrollTop = list.scrollHeight;
-  }, [messages, isReplying]);
+  const [mode, setMode] = useState<ConversationMode>('listen');
 
-  useEffect(() => () => {
-    if (replyTimerRef.current !== null) window.clearTimeout(replyTimerRef.current);
-  }, []);
-
-  const [mode, setMode] = useState<'listen' | 'understand' | 'reframe' | 'help'>('listen');
-
-  const modes: { id: 'listen' | 'understand' | 'reframe' | 'help'; label: string; hint: string }[] = [
+  const modes: { id: ConversationMode; label: string; hint: string }[] = [
     { id: 'listen', label: 'Listen', hint: 'No fixing. Just room.' },
     { id: 'understand', label: 'Understand', hint: 'Find the thread.' },
     { id: 'reframe', label: 'Reframe', hint: 'Look from a new angle.' },
     { id: 'help', label: 'Help', hint: 'Small next steps.' },
   ];
 
+  const createConversation = useCreateConversation();
+  const sendMessage = useSendMessage();
+
+  const isPending = sendMessage.isPending || createConversation.isPending;
+
+  function scrollBottom() {
+    requestAnimationFrame(() => {
+      const el = messageListRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  }
+
+  function appendMessages(apiMessages: Message[], userEmotionTags: EmotionTag[]) {
+    setMessages((current) => {
+      const existing = new Set(current.map((m) => m.id));
+      const next = apiMessages
+        .filter((m) => !existing.has(m.id))
+        .map((m) => ({
+          ...toLocal(m),
+          emotionTags: m.role === 'user' ? userEmotionTags : undefined,
+        }));
+      return [...current, ...next];
+    });
+    scrollBottom();
+  }
+
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const content = draft.trim();
-    if (!content || isReplying) return;
+    if (!content || isPending) return;
 
     const emotionTags = detectLocalEmotions(content);
+    setError('');
 
-    setMessages((current) => [...current, { id: Date.now(), role: 'user', content, emotionTags }]);
+    // Optimistically show the user message immediately
+    const tempId = Date.now();
+    setMessages((current) => [
+      ...current,
+      { id: tempId, role: 'user', content, emotionTags },
+    ]);
     setDraft('');
-    setIsReplying(true);
-    replyTimerRef.current = window.setTimeout(() => {
-      let reply = 'I hear you.';
-      if (mode === 'listen') reply = `I hear how much weight is sitting underneath this feeling. It makes total sense that you feel this way, and you don't have to fix or make it neat right now.`;
-      else if (mode === 'understand') reply = `It sounds like there might be more than one thing happening at once. If you look closely at what's happening, what single part feels hardest to speak out loud right now?`;
-      else if (mode === 'reframe') reply = `Carrying regret around this can feel heavy. Looking at this with compassion: what was actually within your control, how would you advise a dear friend in your exact shoes, and what is one thing you handled right?`;
-      else if (mode === 'help') reply = `Here are 2 concrete, realistic small next steps we can take together:\n1. Take a 5-minute pause without forcing yourself to solve the whole picture.\n2. Identify the single smallest action within your reach today. Would you like to talk through that step first?`;
+    scrollBottom();
 
-      setMessages((current) => [...current, { id: Date.now(), role: 'assistant', content: reply }]);
-      setIsReplying(false);
-      replyTimerRef.current = null;
-    }, 1000);
+    const doSend = (convId: number) => {
+      sendMessage.mutate(
+        { conversationId: convId, data: { content, mode } },
+        {
+          onSuccess: (apiMessages) => {
+            // Replace the optimistic user message with real API messages
+            setMessages((current) => {
+              const withoutTemp = current.filter((m) => m.id !== tempId);
+              const existingIds = new Set(withoutTemp.map((m) => m.id));
+              const incoming = apiMessages
+                .filter((m) => !existingIds.has(m.id))
+                .map((m) => ({
+                  ...toLocal(m),
+                  emotionTags: m.role === 'user' ? emotionTags : undefined,
+                }));
+              return [...withoutTemp, ...incoming];
+            });
+            scrollBottom();
+          },
+          onError: () => {
+            // Remove optimistic message on failure and show error
+            setMessages((current) => current.filter((m) => m.id !== tempId));
+            setError('Your words did not make it through. They are still here — try once more.');
+          },
+        },
+      );
+    };
+
+    if (conversationId !== null) {
+      doSend(conversationId);
+    } else {
+      createConversation.mutate(
+        { data: { title: content.slice(0, 34), mode } },
+        {
+          onSuccess: (conversation) => {
+            setConversationId(conversation.id);
+            doSend(conversation.id);
+          },
+          onError: () => {
+            setMessages((current) => current.filter((m) => m.id !== tempId));
+            setError('Could not open a new conversation. Please try again.');
+          },
+        },
+      );
+    }
   };
 
   return <section className="relative flex min-h-[calc(100dvh-270px)] flex-col overflow-hidden rounded-[28px] border border-border bg-card quiet-shadow">
@@ -204,12 +275,13 @@ export function ChatWindow() {
           )}
         </div>
       ))}
-      {isReplying && <div className="flex justify-start gap-3" data-testid="chat-reply-loading"><div className="rounded-[20px] rounded-bl-md border border-border bg-background px-4 py-3.5 text-sm text-muted-foreground"><span className="inline-flex gap-1" aria-label="Unsaid is replying"><span className="size-1.5 animate-pulse rounded-full bg-accent" /><span className="size-1.5 animate-pulse rounded-full bg-accent [animation-delay:120ms]" /><span className="size-1.5 animate-pulse rounded-full bg-accent [animation-delay:240ms]" /></span></div></div>}
+      {isPending && <div className="flex justify-start gap-3" data-testid="chat-reply-loading"><div className="rounded-[20px] rounded-bl-md border border-border bg-background px-4 py-3.5 text-sm text-muted-foreground"><span className="inline-flex gap-1" aria-label="Unsaid is replying"><span className="size-1.5 animate-pulse rounded-full bg-accent" /><span className="size-1.5 animate-pulse rounded-full bg-accent [animation-delay:120ms]" /><span className="size-1.5 animate-pulse rounded-full bg-accent [animation-delay:240ms]" /></span></div></div>}
+      {error && <div className="text-xs text-accent/80" data-testid="chat-error">{error}</div>}
     </div>
     <form onSubmit={submit} className="relative border-t border-border/70 bg-background/70 p-4 md:p-5">
       <div className="flex items-center gap-3 rounded-2xl border border-border bg-card p-2 pl-4 transition-colors focus-within:border-primary/60">
         <input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Write something..." className="min-w-0 flex-1 bg-transparent py-2 text-sm outline-none placeholder:text-muted-foreground/65" aria-label="Message" data-testid="input-chat-message" />
-        <button type="submit" disabled={!draft.trim() || isReplying} className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-foreground transition-transform hover:scale-105 disabled:opacity-40" aria-label="Send message" data-testid="button-chat-send">{isReplying ? <span className="size-4 animate-spin rounded-full border-2 border-foreground/30 border-t-foreground" /> : <Send size={17} />}</button>
+        <button type="submit" disabled={!draft.trim() || isPending} className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-foreground transition-transform hover:scale-105 disabled:opacity-40" aria-label="Send message" data-testid="button-chat-send">{isPending ? <span className="size-4 animate-spin rounded-full border-2 border-foreground/30 border-t-foreground" /> : <Send size={17} />}</button>
       </div>
       <div className="mt-2 flex items-center justify-between px-1 font-mono-ui text-[9px] uppercase tracking-[.13em] text-muted-foreground/70"><span>Press return to send</span><span>Only you can see this</span></div>
     </form>
