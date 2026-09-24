@@ -13,7 +13,7 @@ import {
   UpdateJournalEntryParams,
   UpdateMemorySettingsBody,
 } from "@workspace/api-zod";
-import { db } from "@workspace/db";
+import { db, pool } from "@workspace/db";
 import {
   conversationsTable,
   emotionTagsTable,
@@ -25,6 +25,7 @@ import {
   settingsTable,
 } from "@workspace/db/schema";
 import { extractMemoryFacts } from "../lib/memory-extractor";
+import { classifyEmotions } from "../lib/emotion-classifier";
 
 const router: IRouter = Router();
 
@@ -94,7 +95,91 @@ function replyFor(mode: Mode, text: string) {
   return `This can stay unshared here. You can leave it unfinished if that is the most honest place to leave it.`;
 }
 
+let schemaInitialized = false;
+
+async function ensureSchema() {
+  if (schemaInitialized) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS public.unsaid_conversations (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT,
+        title TEXT NOT NULL,
+        mode TEXT NOT NULL DEFAULT 'listen',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.unsaid_messages (
+        id SERIAL PRIMARY KEY,
+        conversation_id INTEGER NOT NULL REFERENCES public.unsaid_conversations(id) ON DELETE CASCADE,
+        user_id TEXT,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        emotion TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.unsaid_journal_entries (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT,
+        title TEXT NOT NULL DEFAULT 'Untitled reflection',
+        content TEXT NOT NULL,
+        mood TEXT NOT NULL DEFAULT 'Unmarked',
+        mood_tag TEXT,
+        entry_type TEXT NOT NULL DEFAULT 'open',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.unsaid_memories (
+        id SERIAL PRIMARY KEY,
+        label TEXT NOT NULL,
+        detail TEXT NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.unsaid_settings (
+        id SERIAL PRIMARY KEY,
+        memory_enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.unsaid_private_notes (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT,
+        content TEXT NOT NULL,
+        is_letter BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        expires_at TIMESTAMPTZ
+      );
+
+      CREATE TABLE IF NOT EXISTS public.emotion_tags (
+        id SERIAL PRIMARY KEY,
+        message_id INTEGER REFERENCES public.unsaid_messages(id) ON DELETE CASCADE,
+        user_id TEXT,
+        emotion TEXT NOT NULL,
+        intensity REAL NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE TABLE IF NOT EXISTS public.memory_items (
+        id SERIAL PRIMARY KEY,
+        user_id TEXT,
+        fact TEXT NOT NULL,
+        approved BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `);
+    schemaInitialized = true;
+  } catch (err) {
+    console.error("ensureSchema error:", err);
+  }
+}
+
 async function ensureSeed() {
+  await ensureSchema();
   const existing = await db.select().from(conversationsTable).limit(1);
   if (existing.length > 0) return;
   const [conversation] = await db
@@ -113,6 +198,8 @@ async function ensureSeed() {
     title: "A little lighter",
     content: "I gave myself permission to say the quiet part out loud today.",
     mood: "Relieved",
+    moodTag: "Relieved",
+    entryType: "open",
   });
   await db.insert(memoriesTable).values([
     { label: "How you like support", detail: "You prefer a little space before suggestions.", enabled: true },
@@ -161,6 +248,7 @@ router.get("/companion/conversations", async (_req, res, next) => {
 
 router.post("/companion/conversations", async (req, res, next) => {
   try {
+    await ensureSeed();
     const input = CreateConversationBody.parse(req.body ?? {});
     const [row] = await db.insert(conversationsTable).values({
       title: input.title || "A new conversation",
@@ -221,6 +309,22 @@ router.post("/companion/conversations/:conversationId/messages", async (req, res
               userId: userMessage.userId || conversation.userId || null,
               fact,
               approved: false,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+
+    // AI emotion classification - saves 1-3 emotion tags linked to the user message
+    classifyEmotions(content)
+      .then(async (tags) => {
+        if (tags.length > 0) {
+          await db.insert(emotionTagsTable).values(
+            tags.map((tag) => ({
+              messageId: userMessage.id,
+              userId: userMessage.userId || conversation.userId || null,
+              emotion: tag.emotion,
+              intensity: tag.intensity,
             }))
           );
         }
@@ -418,12 +522,59 @@ router.post("/chat", async (req, res, next) => {
       })
       .catch(() => {});
 
+    // AI emotion classification - saves 1-3 emotion tags linked to the user message
+    classifyEmotions(content || "")
+      .then(async (tags) => {
+        if (tags.length > 0) {
+          await db.insert(emotionTagsTable).values(
+            tags.map((tag) => ({
+              messageId: userMessage.id,
+              userId: userMessage.userId || null,
+              emotion: tag.emotion,
+              intensity: tag.intensity,
+            }))
+          );
+        }
+      })
+      .catch(() => {});
+
     res.json({
       conversationId,
       userMessage: messageView(userMessage),
       assistantMessage: messageView(assistantMessage),
       messages: [messageView(userMessage), messageView(assistantMessage)],
     });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get emotion tags for a specific message
+router.get("/companion/messages/:messageId/emotion-tags", async (req, res, next) => {
+  try {
+    const messageId = Number(req.params.messageId);
+    const rows = await db.select().from(emotionTagsTable)
+      .where(eq(emotionTagsTable.messageId, messageId))
+      .orderBy(desc(emotionTagsTable.intensity));
+    res.json(rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })));
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Get all emotion tags for every message in a conversation
+router.get("/companion/conversations/:conversationId/emotion-tags", async (req, res, next) => {
+  try {
+    const conversationId = Number(req.params.conversationId);
+    const messages = await db.select({ id: messagesTable.id })
+      .from(messagesTable)
+      .where(eq(messagesTable.conversationId, conversationId));
+    if (messages.length === 0) { res.json([]); return; }
+    const msgIds = messages.map((m) => m.id);
+    const rows = await db.select().from(emotionTagsTable)
+      .where(sql`${emotionTagsTable.messageId} = ANY(${msgIds})`)
+      .orderBy(emotionTagsTable.createdAt);
+    res.json(rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })));
   } catch (error) {
     next(error);
   }
