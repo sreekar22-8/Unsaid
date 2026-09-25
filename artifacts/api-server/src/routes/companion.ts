@@ -314,6 +314,7 @@ router.post("/companion/conversations", async (req, res, next) => {
     const [row] = await db
       .insert(conversationsTable)
       .values({
+        userId: null,
         title: input.title || "A new conversation",
         mode: input.mode || "listen",
       })
@@ -629,7 +630,7 @@ async function buildDashboard(
   journalCount?: number,
   existingMessages?: Array<typeof messagesTable.$inferSelect>,
 ) {
-  const [conversations, journals, messages] = await Promise.all([
+  const [conversations, journals, messages, emotionTagRows] = await Promise.all([
     conversationCount === undefined
       ? db.select().from(conversationsTable)
       : Promise.resolve([]),
@@ -641,25 +642,36 @@ async function buildDashboard(
     existingMessages
       ? Promise.resolve(existingMessages)
       : db.select().from(messagesTable),
+
+    db.select().from(emotionTagsTable),
   ]);
 
   const allMessages = existingMessages ?? messages;
 
   const counts = new Map<string, number>();
 
+  // Count from the single-emotion field on messages
   allMessages.forEach((message) => {
     if (message.emotion && message.role === "user") {
       counts.set(message.emotion, (counts.get(message.emotion) ?? 0) + 1);
     }
   });
 
+  // Also count from the richer AI-classified emotion_tags table
+  emotionTagRows.forEach((tag) => {
+    const key = tag.emotion.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+
+  const palette = ["#c88770", "#7e9d99", "#c1a15d", "#8d83a8", "#7aab8a"];
+
   const topEmotions = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
+    .slice(0, 5)
     .map(([emotion, count], index) => ({
       emotion,
       count,
-      color: ["#c88770", "#7e9d99", "#c1a15d", "#8d83a8"][index],
+      color: palette[index],
     }));
 
   return {
@@ -677,7 +689,7 @@ async function buildDashboard(
           {
             emotion: "uncertain",
             count: 1,
-            color: "#c88770",
+            color: palette[0],
           },
         ],
 

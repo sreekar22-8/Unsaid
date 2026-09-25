@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
 import { ArrowUpRight, BarChart3, BookOpen, Check, ChevronDown, Clock3, Feather, Heart, LockKeyhole, MessageCircle, Plus, Save, Send, ShieldCheck, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
@@ -157,12 +157,614 @@ export function JournalPage() {
     {query.isError && !entries.length ? <ErrorNotice message="Your journal is safe, but it is not responding right now." /> : query.isLoading && !entries.length ? <LoadingBlocks count={4} /> : entries.length === 0 ? <EmptyState icon={BookOpen} title="The first page is blank" description="Write toward the feeling, not a perfect summary." action={<Button onClick={() => setEditorOpen(true)}><Feather size={14} />Begin a page</Button>} /> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{entries.map((entry, index) => <article key={entry.id} className={`group relative flex min-h-[250px] flex-col rounded-[25px] border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${index === 0 ? 'md:col-span-2 bg-secondary/65' : ''}`} data-testid={`card-journal-entry-${entry.id}`}><div className="mb-8 flex items-start justify-between"><span className="rounded-full bg-background/70 px-2.5 py-1 font-mono-ui text-[9px] uppercase tracking-wider text-primary">{entry.mood || 'Unmarked'}</span><div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100"><button onClick={() => { setEditing(entry); setEditorOpen(true); }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`Edit ${entry.title || 'entry'}`} data-testid={`button-edit-entry-${entry.id}`}><Feather size={14} /></button><button onClick={() => remove(entry.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Delete ${entry.title || 'entry'}`} data-testid={`button-delete-entry-${entry.id}`}><Trash2 size={14} /></button></div></div><h2 className="font-display text-2xl tracking-[-.03em]">{entry.title || 'Untitled thought'}</h2><p className="mt-3 line-clamp-4 text-sm leading-6 text-muted-foreground">{entry.content}</p><div className="mt-auto flex items-center gap-1.5 pt-7 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground"><Clock3 size={11} />{formatDate(entry.updatedAt || entry.createdAt, true)}</div></article>)}</div>}{editorOpen && <JournalEditor entry={editing} onClose={() => setEditorOpen(false)} onSaved={() => {}} />}</AppShell>;
 }
 
+function getMoodColor(mood?: string | null): string {
+  if (!mood) return '#8d83a8';
+  const m = mood.toLowerCase();
+  if (m.includes('hope') || m.includes('clear')) return '#c1a15d';
+  if (m.includes('relie') || m.includes('calm') || m.includes('peace')) return '#569882';
+  if (m.includes('tender') || m.includes('soft')) return '#c88770';
+  if (m.includes('heavy') || m.includes('sad') || m.includes('grief')) return '#798ea4';
+  if (m.includes('unsettle') || m.includes('anxious') || m.includes('frustrat') || m.includes('anger')) return '#b87070';
+  if (m.includes('regret') || m.includes('guilt') || m.includes('shame')) return '#7e82a8';
+  return '#8d83a8';
+}
+
 export function InsightsPage() {
   const bootstrap = useGetCompanionBootstrap();
   const query = useGetDashboardSummary({ query: { queryKey: getGetDashboardSummaryQueryKey() } });
   const summary = query.data ?? bootstrap.data?.dashboard;
+
+  const journalQuery = useListJournalEntries({ query: { queryKey: getListJournalEntriesQueryKey() } });
+  const rawJournalEntries = journalQuery.data ?? bootstrap.data?.journalEntries;
+  const journalEntries: JournalEntry[] = Array.isArray(rawJournalEntries) ? rawJournalEntries : [];
+
   const max = Math.max(...(summary?.weeklyIntensity?.map((point) => point.value) ?? [1]), 1);
-  return <AppShell><PageHeading eyebrow="A gentle read" title="Your inner weather." description="Patterns are not verdicts. They are invitations to notice what you already know." /><div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">{[['Check-ins', summary?.checkIns ?? 0, MessageCircle], ['Journal pages', summary?.journalEntries ?? 0, BookOpen], ['Conversations', summary?.conversations ?? 0, Feather], ['Current streak', summary?.streak ?? 0, Heart]].map(([label, value, Icon], index) => { const StatIcon = Icon as typeof Heart; return <div key={label as string} className={`animate-rise stagger-${index + 1} rounded-[23px] border border-border bg-card p-5`} data-testid={`stat-${String(label).toLowerCase().replaceAll(' ', '-')}`}><div className="mb-7 flex items-center justify-between"><span className="font-mono-ui text-[9px] uppercase tracking-[.16em] text-muted-foreground">{label as string}</span><StatIcon size={16} className="text-accent" /></div><p className="font-display text-4xl">{value as number}</p><p className="mt-1 text-xs text-muted-foreground">{label === 'Current streak' ? 'days of checking in' : 'so far, this season'}</p></div> })}</div>{query.isError && !summary ? <div className="mt-5"><ErrorNotice message="The reflection board is resting. Check back in a moment." /></div> : <div className="mt-5 grid gap-5 lg:grid-cols-[1.3fr_.7fr]"><section className="rounded-[25px] border border-border bg-card p-6 md:p-7"><div className="mb-8 flex items-start justify-between"><div><SectionLabel>Seven day rhythm</SectionLabel><h2 className="font-display text-2xl">Intensity, without judgement.</h2></div><BarChart3 size={19} className="text-primary" /></div>{summary?.weeklyIntensity?.length ? <div className="flex h-[210px] items-end gap-2 border-b border-border pb-0 sm:gap-4">{summary.weeklyIntensity.map((point, index) => <div key={`${point.day}-${index}`} className="group flex h-full flex-1 flex-col items-center justify-end gap-3" data-testid={`chart-intensity-${point.day}-${index}`}><div className="relative w-full max-w-[42px] rounded-t-xl bg-secondary transition-all duration-500 group-hover:bg-accent" style={{ height: `${Math.max((point.value / max) * 78, 9)}%` }}><span className="absolute -top-6 left-1/2 -translate-x-1/2 font-mono-ui text-[9px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">{point.value}</span></div><span className="font-mono-ui text-[9px] uppercase text-muted-foreground">{point.day}</span></div>)}</div> : <EmptyState icon={BarChart3} title="Your rhythm will appear here" description="A few check-ins are all it takes to begin seeing your own pattern." />}</section><section className="rounded-[25px] border border-border bg-primary p-6 text-primary-foreground md:p-7"><SectionLabel>Coming up often</SectionLabel><h2 className="font-display text-2xl">What has been close lately.</h2>{summary?.topEmotions?.length ? <div className="mt-7 space-y-5">{summary.topEmotions.map((emotion) => <div key={emotion.emotion}><div className="mb-2 flex justify-between text-xs"><span className="font-semibold">{emotion.emotion}</span><span className="text-primary-foreground/60">{emotion.count} mentions</span></div><div className="h-1.5 overflow-hidden rounded-full bg-primary-foreground/15"><div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(emotion.count * 13 + 18, 100)}%` }} /></div></div>)}</div> : <p className="mt-7 text-sm leading-6 text-primary-foreground/65">As you talk and write, the shape of your feelings will become easier to see here.</p>}<div className="mt-10 border-t border-primary-foreground/15 pt-4 text-xs leading-5 text-primary-foreground/60">There is no “right” emotional baseline. This is simply your noticing place.</div></section></div>}</AppShell>;
+  const emotionMax = Math.max(...(summary?.topEmotions?.map((e) => e.count) ?? [1]), 1);
+
+  // 1. Calendar Heatmap (Last 60 Days dominant mood_tag)
+  const heatmapDays = useMemo(() => {
+    const days: Array<{
+      dateStr: string;
+      displayDate: string;
+      dominantMood: string | null;
+      color: string;
+      count: number;
+    }> = [];
+
+    const entriesByDay = new Map<string, JournalEntry[]>();
+    for (const entry of journalEntries) {
+      if (!entry.createdAt) continue;
+      const d = new Date(entry.createdAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const list = entriesByDay.get(key) ?? [];
+      list.push(entry);
+      entriesByDay.set(key, list);
+    }
+
+    const now = new Date();
+    for (let i = 59; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const dateKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      const displayDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      const dayEntries = entriesByDay.get(dateKey) ?? [];
+
+      if (dayEntries.length > 0) {
+        const moodCounts = new Map<string, number>();
+        for (const e of dayEntries) {
+          const mood = (e.moodTag || e.mood || 'Reflective').trim();
+          moodCounts.set(mood, (moodCounts.get(mood) ?? 0) + 1);
+        }
+        let topMood = '';
+        let topCount = 0;
+        for (const [m, c] of moodCounts.entries()) {
+          if (c > topCount) {
+            topCount = c;
+            topMood = m;
+          }
+        }
+        days.push({
+          dateStr: dateKey,
+          displayDate,
+          dominantMood: topMood,
+          color: getMoodColor(topMood),
+          count: dayEntries.length,
+        });
+      } else {
+        days.push({
+          dateStr: dateKey,
+          displayDate,
+          dominantMood: null,
+          color: '',
+          count: 0,
+        });
+      }
+    }
+
+    return days;
+  }, [journalEntries]);
+
+  // 2. Growth View (Selected Emotion & Line Chart of intensity over time)
+  const [selectedEmotion, setSelectedEmotion] = useState('Regret');
+
+  const availableEmotions = useMemo(() => {
+    const defaultEmotions = [
+      'Regret',
+      'Anxiety',
+      'Sadness',
+      'Grief',
+      'Guilt',
+      'Loneliness',
+      'Frustration',
+      'Tender',
+      'Hopeful',
+      'Relieved',
+      'Unsettled',
+      'Reflective',
+    ];
+    const set = new Set<string>(defaultEmotions);
+    for (const e of journalEntries) {
+      if (e.moodTag) set.add(e.moodTag);
+      if (e.mood) set.add(e.mood);
+    }
+    return Array.from(set);
+  }, [journalEntries]);
+
+  const growthData = useMemo(() => {
+    const target = selectedEmotion.toLowerCase().trim();
+    const points: Array<{
+      dateStr: string;
+      displayDate: string;
+      intensity: number;
+      rawDate: number;
+    }> = [];
+
+    for (const entry of journalEntries) {
+      if (!entry.createdAt) continue;
+      const moodStr = `${entry.moodTag || ''} ${entry.mood || ''}`.toLowerCase();
+      const contentStr = (entry.content || '').toLowerCase();
+
+      let matched = false;
+      let intensity = 0.5;
+
+      if (moodStr.includes(target) || (target.length > 3 && target.includes(moodStr.trim()))) {
+        matched = true;
+        intensity = 0.65;
+      }
+
+      const tags = detectLocalEmotions(entry.content || '');
+      const foundTag = tags.find(
+        (t) => t.emotion.toLowerCase().includes(target) || target.includes(t.emotion.toLowerCase()),
+      );
+      if (foundTag) {
+        matched = true;
+        intensity = foundTag.intensity;
+      } else if (contentStr.includes(target)) {
+        matched = true;
+        intensity = Math.min(0.95, Math.max(0.4, 0.5 + Math.min((entry.content || '').length / 500, 0.4)));
+      }
+
+      if (matched) {
+        const d = new Date(entry.createdAt);
+        points.push({
+          dateStr: entry.createdAt.slice(0, 10),
+          displayDate: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          intensity: parseFloat(intensity.toFixed(2)),
+          rawDate: d.getTime(),
+        });
+      }
+    }
+
+    points.sort((a, b) => a.rawDate - b.rawDate);
+    return points;
+  }, [selectedEmotion, journalEntries]);
+
+  const growthEmotionColor = getMoodColor(selectedEmotion);
+
+  // SVG Line Chart metrics & coordinates
+  const chartW = 600;
+  const chartH = 170;
+  const padL = 45;
+  const padR = 30;
+  const padT = 25;
+  const padB = 35;
+  const usableW = chartW - padL - padR;
+  const usableH = chartH - padT - padB;
+
+  const growthCoords = useMemo(() => {
+    return growthData.map((pt, idx) => {
+      const x = growthData.length === 1 ? chartW / 2 : padL + (idx / (growthData.length - 1)) * usableW;
+      const y = chartH - padB - pt.intensity * usableH;
+      return { ...pt, x, y };
+    });
+  }, [growthData, usableW, usableH]);
+
+  const linePath = useMemo(() => {
+    if (growthCoords.length < 2) return '';
+    return growthCoords.reduce(
+      (acc, pt, idx) => `${acc} ${idx === 0 ? 'M' : 'L'} ${pt.x.toFixed(1)} ${pt.y.toFixed(1)}`,
+      '',
+    );
+  }, [growthCoords]);
+
+  const areaPath = useMemo(() => {
+    if (growthCoords.length < 2) return '';
+    const baseY = (chartH - padB).toFixed(1);
+    const firstX = growthCoords[0].x.toFixed(1);
+    const lastX = growthCoords[growthCoords.length - 1].x.toFixed(1);
+    return `${linePath} L ${lastX} ${baseY} L ${firstX} ${baseY} Z`;
+  }, [linePath, growthCoords]);
+
+  return (
+    <AppShell>
+      <PageHeading
+        eyebrow="A gentle read"
+        title="Your inner weather."
+        description="Patterns are not verdicts. They are invitations to notice what you already know."
+      />
+
+      {/* Top 4 Summary Stat Cards */}
+      <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        {[
+          ['Check-ins', summary?.checkIns ?? 0, MessageCircle],
+          ['Journal pages', summary?.journalEntries ?? 0, BookOpen],
+          ['Conversations', summary?.conversations ?? 0, Feather],
+          ['Current streak', summary?.streak ?? 0, Heart],
+        ].map(([label, value, Icon], index) => {
+          const StatIcon = Icon as typeof Heart;
+          return (
+            <div
+              key={label as string}
+              className={`animate-rise stagger-${index + 1} rounded-[23px] border border-border bg-card p-5`}
+              data-testid={`stat-${String(label).toLowerCase().replaceAll(' ', '-')}`}
+            >
+              <div className="mb-7 flex items-center justify-between">
+                <span className="font-mono-ui text-[9px] uppercase tracking-[.16em] text-muted-foreground">
+                  {label as string}
+                </span>
+                <StatIcon size={16} className="text-accent" />
+              </div>
+              <p className="font-display text-4xl">{value as number}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {label === 'Current streak' ? 'days of checking in' : 'so far, this season'}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+
+      {query.isError && !summary ? (
+        <div className="mt-5">
+          <ErrorNotice message="The reflection board is resting. Check back in a moment." />
+        </div>
+      ) : (
+        <>
+          {/* Existing 2-Column Rhythm and Top Emotions Charts */}
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+            <section className="rounded-[25px] border border-border bg-card p-6 md:p-7">
+              <div className="mb-8 flex items-start justify-between">
+                <div>
+                  <SectionLabel>Seven day rhythm</SectionLabel>
+                  <h2 className="font-display text-2xl">Intensity, without judgement.</h2>
+                </div>
+                <BarChart3 size={19} className="text-primary" />
+              </div>
+              {summary?.weeklyIntensity?.length ? (
+                <div className="flex h-[210px] items-end gap-2 border-b border-border pb-0 sm:gap-4">
+                  {summary.weeklyIntensity.map((point, index) => (
+                    <div
+                      key={`${point.day}-${index}`}
+                      className="group flex h-full flex-1 flex-col items-center justify-end gap-3"
+                      data-testid={`chart-intensity-${point.day}-${index}`}
+                    >
+                      <div
+                        className="relative w-full max-w-[42px] rounded-t-xl bg-secondary transition-all duration-500 group-hover:bg-accent"
+                        style={{ height: `${Math.max((point.value / max) * 78, 9)}%` }}
+                      >
+                        <span className="absolute -top-6 left-1/2 -translate-x-1/2 font-mono-ui text-[9px] text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100">
+                          {point.value}
+                        </span>
+                      </div>
+                      <span className="font-mono-ui text-[9px] uppercase text-muted-foreground">{point.day}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={BarChart3}
+                  title="Your rhythm will appear here"
+                  description="A few check-ins are all it takes to begin seeing your own pattern."
+                />
+              )}
+            </section>
+
+            <section
+              className="rounded-[25px] border border-border bg-card p-6 md:p-7"
+              data-testid="section-top-emotions-chart"
+            >
+              <div className="mb-8 flex items-start justify-between">
+                <div>
+                  <SectionLabel>Coming up often</SectionLabel>
+                  <h2 className="font-display text-2xl">Top emotions, by count.</h2>
+                </div>
+                <BarChart3 size={19} className="text-primary" />
+              </div>
+              {summary?.topEmotions?.length ? (
+                <div className="flex h-[210px] items-end gap-3 border-b border-border pb-0 sm:gap-4">
+                  {summary.topEmotions.map((item, index) => (
+                    <div
+                      key={item.emotion}
+                      className="group flex h-full flex-1 flex-col items-center justify-end gap-3"
+                      data-testid={`chart-emotion-${item.emotion}-${index}`}
+                    >
+                      <div
+                        className="relative w-full rounded-t-xl transition-all duration-500"
+                        style={{
+                          height: `${Math.max((item.count / emotionMax) * 78, 9)}%`,
+                          backgroundColor: item.color,
+                          opacity: 0.82,
+                        }}
+                      >
+                        <span className="absolute -top-6 left-1/2 -translate-x-1/2 font-mono-ui text-[9px] font-semibold text-foreground opacity-0 transition-opacity group-hover:opacity-100 whitespace-nowrap">
+                          {item.count}
+                        </span>
+                      </div>
+                      <span className="w-full truncate text-center font-mono-ui text-[9px] uppercase leading-tight text-muted-foreground">
+                        {item.emotion}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={BarChart3}
+                  title="Your emotions will appear here"
+                  description="As you talk, the feelings you carry most will show up here."
+                />
+              )}
+              <div className="mt-6 border-t border-border/60 pt-4 font-mono-ui text-[9px] uppercase tracking-[.13em] text-muted-foreground/60">
+                Counts across all conversations · Hover a bar to see the number
+              </div>
+            </section>
+          </div>
+
+          {/* Feature 1: Calendar-Style Heatmap (Last 60 Days dominant mood_tag) */}
+          <section
+            className="mt-5 rounded-[25px] border border-border bg-card p-6 md:p-7"
+            data-testid="section-journal-heatmap"
+          >
+            <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <SectionLabel>Mood rhythm</SectionLabel>
+                <h2 className="font-display text-2xl">Inner weather across 60 days.</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Each tile represents the dominant mood tag recorded in your journal pages.
+                </p>
+              </div>
+              <div className="font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">
+                Last 60 days · {journalEntries.length} {journalEntries.length === 1 ? 'entry' : 'entries'}
+              </div>
+            </div>
+
+            {/* Heatmap Grid: 60 Day Tiles */}
+            <div className="flex flex-wrap gap-2 pt-2" data-testid="heatmap-grid">
+              {heatmapDays.map((day) => (
+                <div
+                  key={day.dateStr}
+                  className={`group relative size-6 rounded-md transition-all duration-200 hover:scale-125 hover:z-10 ${
+                    day.dominantMood
+                      ? 'shadow-xs cursor-pointer'
+                      : 'border border-border/50 bg-secondary/35 hover:border-border cursor-default'
+                  }`}
+                  style={day.dominantMood ? { backgroundColor: day.color } : undefined}
+                  data-testid={`heatmap-day-${day.dateStr}`}
+                  aria-label={`${day.displayDate}: ${day.dominantMood || 'No entry'}`}
+                >
+                  {/* Tooltip on hover */}
+                  <div className="pointer-events-none absolute -top-8 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-lg border border-border bg-popover px-2 py-1 font-mono-ui text-[9px] font-medium text-popover-foreground opacity-0 shadow-md transition-opacity group-hover:opacity-100 z-30">
+                    {day.displayDate}: {day.dominantMood ? `${day.dominantMood} (${day.count})` : 'No entry'}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Legend for Mood Heatmap */}
+            <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-border/60 pt-4 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">
+              <span className="font-semibold text-foreground">Moods:</span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 rounded-sm" style={{ backgroundColor: '#c1a15d' }} />
+                Hopeful
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 rounded-sm" style={{ backgroundColor: '#569882' }} />
+                Relieved
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 rounded-sm" style={{ backgroundColor: '#c88770' }} />
+                Tender
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 rounded-sm" style={{ backgroundColor: '#798ea4' }} />
+                Heavy
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 rounded-sm" style={{ backgroundColor: '#b87070' }} />
+                Unsettled
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 rounded-sm" style={{ backgroundColor: '#8d83a8' }} />
+                Reflective
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="size-2.5 rounded-sm border border-border/60 bg-secondary/35" />
+                No entry
+              </span>
+            </div>
+          </section>
+
+          {/* Feature 2: Growth View (Emotion intensity over time) */}
+          <section
+            className="mt-5 rounded-[25px] border border-border bg-card p-6 md:p-7"
+            data-testid="section-growth-view"
+          >
+            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <SectionLabel>Growth view</SectionLabel>
+                <h2 className="font-display text-2xl">Watching feelings soften.</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Pick a feeling to see only that emotion&apos;s intensity over time across your journal reflections.
+                </p>
+              </div>
+
+              {/* Emotion Selector Dropdown */}
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <label
+                  htmlFor="select-growth-emotion"
+                  className="font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground"
+                >
+                  Emotion:
+                </label>
+                <select
+                  id="select-growth-emotion"
+                  value={selectedEmotion}
+                  onChange={(e) => setSelectedEmotion(e.target.value)}
+                  className="rounded-xl border border-border bg-background px-3 py-1.5 font-mono-ui text-xs font-semibold text-foreground outline-none transition-colors focus:border-primary"
+                  data-testid="select-growth-emotion"
+                >
+                  {availableEmotions.map((emotion) => (
+                    <option key={emotion} value={emotion}>
+                      {emotion}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Growth View Line Chart or Empty State */}
+            {growthData.length === 0 ? (
+              <div className="py-6" data-testid="growth-chart-empty">
+                <EmptyState
+                  icon={BarChart3}
+                  title={`No reflections for ${selectedEmotion} yet`}
+                  description={`When you write journal entries touching on ${selectedEmotion.toLowerCase()}, its intensity over time will appear here so you can notice how it eases.`}
+                />
+              </div>
+            ) : (
+              <div className="space-y-3" data-testid="container-growth-chart">
+                {/* Metric Summary */}
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2 font-mono-ui text-[10px] uppercase tracking-wider">
+                    <span
+                      className="size-2 rounded-full"
+                      style={{ backgroundColor: growthEmotionColor }}
+                      aria-hidden
+                    />
+                    <span className="font-semibold text-foreground">{selectedEmotion}</span>
+                    <span>
+                      · {growthData.length} {growthData.length === 1 ? 'reflection' : 'reflections'}
+                    </span>
+                  </div>
+                  {growthData.length > 1 && (
+                    <div className="font-mono-ui text-[10px] text-accent">
+                      {Math.round(growthData[0].intensity * 100)}% →{' '}
+                      {Math.round(growthData[growthData.length - 1].intensity * 100)}%
+                      {growthData[0].intensity > growthData[growthData.length - 1].intensity && (
+                        <span className="ml-2 rounded-full bg-accent/15 px-2 py-0.5 text-foreground font-semibold">
+                          Eased{' '}
+                          {Math.round(
+                            (growthData[0].intensity - growthData[growthData.length - 1].intensity) * 100,
+                          )}
+                          %
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* SVG Line Chart */}
+                <div className="relative w-full overflow-hidden rounded-2xl border border-border/60 bg-background/50 p-4">
+                  <svg
+                    viewBox={`0 0 ${chartW} ${chartH}`}
+                    className="w-full h-auto max-h-[220px] overflow-visible"
+                    data-testid="growth-line-chart"
+                  >
+                    <defs>
+                      <linearGradient id="growthAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor={growthEmotionColor} stopOpacity="0.32" />
+                        <stop offset="100%" stopColor={growthEmotionColor} stopOpacity="0.0" />
+                      </linearGradient>
+                    </defs>
+
+                    {/* Y-Axis Grid Lines & Labels */}
+                    {[
+                      { val: 1.0, y: padT, label: '100%' },
+                      { val: 0.5, y: padT + usableH / 2, label: '50%' },
+                      { val: 0.0, y: chartH - padB, label: '0%' },
+                    ].map((grid) => (
+                      <g key={grid.label}>
+                        <line
+                          x1={padL}
+                          y1={grid.y}
+                          x2={chartW - padR}
+                          y2={grid.y}
+                          stroke="currentColor"
+                          className="text-border/60"
+                          strokeDasharray="4 4"
+                          strokeWidth="1"
+                        />
+                        <text
+                          x={padL - 8}
+                          y={grid.y + 3}
+                          textAnchor="end"
+                          className="fill-muted-foreground font-mono-ui text-[9px]"
+                        >
+                          {grid.label}
+                        </text>
+                      </g>
+                    ))}
+
+                    {/* Area under line */}
+                    {areaPath && <path d={areaPath} fill="url(#growthAreaGradient)" />}
+
+                    {/* Connecting line */}
+                    {linePath && (
+                      <path
+                        d={linePath}
+                        fill="none"
+                        stroke={growthEmotionColor}
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    )}
+
+                    {/* Data Points */}
+                    {growthCoords.map((pt) => (
+                      <g key={`${pt.dateStr}-${pt.rawDate}`} className="group/dot cursor-pointer">
+                        {/* Outer hover ring */}
+                        <circle
+                          cx={pt.x}
+                          cy={pt.y}
+                          r={6}
+                          fill="none"
+                          stroke={growthEmotionColor}
+                          strokeWidth="1.5"
+                          className="opacity-0 transition-opacity duration-200 group-hover/dot:opacity-100"
+                        />
+                        {/* Main Dot */}
+                        <circle
+                          cx={pt.x}
+                          cy={pt.y}
+                          r={4}
+                          className="fill-background stroke-2 transition-transform duration-200 group-hover/dot:scale-125"
+                          style={{ stroke: growthEmotionColor }}
+                        />
+                        <circle cx={pt.x} cy={pt.y} r={2} style={{ fill: growthEmotionColor }} />
+
+                        {/* Interactive Tooltip on Dot Hover */}
+                        <g className="pointer-events-none opacity-0 transition-opacity duration-200 group-hover/dot:opacity-100 z-30">
+                          <rect
+                            x={Math.max(10, Math.min(pt.x - 48, chartW - 100))}
+                            y={Math.max(5, pt.y - 30)}
+                            width={96}
+                            height={22}
+                            rx={6}
+                            className="fill-popover stroke stroke-border shadow-md"
+                          />
+                          <text
+                            x={Math.max(58, Math.min(pt.x, chartW - 52))}
+                            y={Math.max(19, pt.y - 16)}
+                            textAnchor="middle"
+                            className="fill-popover-foreground font-mono-ui text-[9px] font-bold"
+                          >
+                            {Math.round(pt.intensity * 100)}% · {pt.displayDate}
+                          </text>
+                        </g>
+
+                        {/* X-Axis date label */}
+                        <text
+                          x={pt.x}
+                          y={chartH - padB + 16}
+                          textAnchor="middle"
+                          className="fill-muted-foreground font-mono-ui text-[9px] uppercase tracking-wider"
+                        >
+                          {pt.displayDate}
+                        </text>
+                      </g>
+                    ))}
+                  </svg>
+                </div>
+
+                <div className="border-t border-border/60 pt-3 font-mono-ui text-[9px] uppercase tracking-[.13em] text-muted-foreground/60">
+                  {selectedEmotion} intensity over time · Hover any point to inspect date &amp; score
+                </div>
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </AppShell>
+  );
 }
 
 export function MemoryPage() {
