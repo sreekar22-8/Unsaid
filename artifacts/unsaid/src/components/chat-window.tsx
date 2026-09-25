@@ -10,7 +10,7 @@ import type { ConversationMode, Message } from '@workspace/api-client-react';
 // Types
 // ---------------------------------------------------------------------------
 
-type EmotionTag = {
+export type EmotionTag = {
   emotion: string;
   intensity: number; // 0–1
 };
@@ -64,7 +64,7 @@ function emotionColor(emotion: string) {
 // EmotionBadge
 // ---------------------------------------------------------------------------
 
-function EmotionBadge({ tag }: { tag: EmotionTag }) {
+export function EmotionBadge({ tag }: { tag: EmotionTag }) {
   const c = emotionColor(tag.emotion);
   const pct = Math.round(tag.intensity * 100);
   return (
@@ -84,7 +84,7 @@ function EmotionBadge({ tag }: { tag: EmotionTag }) {
 // messages locally so badges appear immediately before the API responds.
 // ---------------------------------------------------------------------------
 
-function detectLocalEmotions(text: string): EmotionTag[] {
+export function detectLocalEmotions(text: string): EmotionTag[] {
   const lower = text.toLowerCase();
   const tags: EmotionTag[] = [];
 
