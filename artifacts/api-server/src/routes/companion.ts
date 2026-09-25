@@ -24,7 +24,7 @@ import {
   privateNotesTable,
   settingsTable,
 } from "@workspace/db/schema";
-import { extractMemoryFacts } from "../lib/memory-extractor";
+import { classifyEmotions, extractMemoryFacts } from "../lib/memory-extractor";
 
 const router: IRouter = Router();
 
@@ -50,6 +50,24 @@ function journalView(row: typeof journalEntriesTable.$inferSelect) {
 
 function memoryView(row: typeof memoriesTable.$inferSelect) {
   return { ...row, createdAt: row.createdAt.toISOString() };
+}
+
+async function saveEmotionTags(
+  message: typeof messagesTable.$inferSelect,
+  userId: string | null,
+  content: string,
+) {
+  const emotions = await classifyEmotions(content);
+  if (emotions.length === 0) return;
+
+  await db.insert(emotionTagsTable).values(
+    emotions.map(({ emotion, intensity }) => ({
+      messageId: message.id,
+      userId,
+      emotion,
+      intensity,
+    })),
+  );
 }
 
 function privateNoteView(row: typeof privateNotesTable.$inferSelect) {
@@ -201,6 +219,7 @@ router.post("/companion/conversations/:conversationId/messages", async (req, res
       content,
       emotion: userEmotion,
     }).returning();
+    void saveEmotionTags(userMessage, userMessage.userId || conversation.userId || null, content).catch(() => {});
     const [assistantMessage] = await db.insert(messagesTable).values({
       conversationId,
       role: "assistant",
@@ -392,6 +411,7 @@ router.post("/chat", async (req, res, next) => {
       content: content || "",
       emotion: userEmotion,
     }).returning();
+    void saveEmotionTags(userMessage, userMessage.userId || conversation.userId || null, content || "").catch(() => {});
 
     const replyContent = replyFor(mode, content || "");
     const [assistantMessage] = await db.insert(messagesTable).values({

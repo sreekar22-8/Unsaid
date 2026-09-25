@@ -69,7 +69,9 @@ export const privateNotesTable = pgTable("unsaid_private_notes", {
 
 export const emotionTagsTable = pgTable("emotion_tags", {
   id: serial("id").primaryKey(),
-  messageId: integer("message_id").references(() => messagesTable.id, { onDelete: "cascade" }),
+  messageId: integer("message_id")
+    .notNull()
+    .references(() => messagesTable.id, { onDelete: "cascade" }),
   userId: text("user_id"),
   emotion: text("emotion").notNull(),
   intensity: real("intensity").notNull(),
