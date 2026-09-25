@@ -124,6 +124,38 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmotionDetection"
+  /companion/messages/{messageId}/emotion-tags:
+    get:
+      operationId: listEmotionTagsForMessage
+      tags: [companion]
+      summary: List emotion tags for a specific message
+      parameters:
+        - $ref: "#/components/parameters/MessageId"
+      responses:
+        "200":
+          description: Emotion tags for the message
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EmotionTag"
+  /companion/conversations/{conversationId}/emotion-tags:
+    get:
+      operationId: listEmotionTagsForConversation
+      tags: [companion]
+      summary: List all emotion tags for messages in a conversation
+      parameters:
+        - $ref: "#/components/parameters/ConversationId"
+      responses:
+        "200":
+          description: All emotion tags for the conversation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EmotionTag"
   /companion/journal:
     get:
       operationId: listJournalEntries
