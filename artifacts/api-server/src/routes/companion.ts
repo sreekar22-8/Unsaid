@@ -159,14 +159,22 @@ function emotionFor(text: string) {
 
 export const SYSTEM_PROMPTS: Record<Mode, string> = {
   listen:
-    "You are a warm, empathetic listener. Reflect and validate feelings gently. NEVER give advice or action steps. Do not attempt to fix or solve the situation.",
+    "You are a warm, empathetic listener. Help the user feel heard and less alone. Reflect the situation naturally, offer comfort when it fits, and ask a gentle follow-up when it would help. Do not jump into generic advice or try to solve the situation.",
   understand:
-    "You are a reflective companion helping the user name and explore complex internal experiences. Ask ONE gentle clarifying question at a time to help name mixed emotions. Do not rush to give advice.",
+    "You are a reflective companion helping the user understand what is happening underneath their words. Notice the situation, recurring thoughts, needs, and mixed feelings. Ask one thoughtful question at a time when useful; do not rush to give advice.",
   reframe:
-    "You are a gentle cognitive reframing companion. Help the user see a regret or mistake from a different angle — what they learned, what was actually in their control, how they'd advise a friend in the same situation, and one thing they did right. NEVER suggest 'just forget about it' — the goal is processing, not suppression.",
-  help: "You are a supportive, practical guide for taking manageable next steps. Give 2 to 3 concrete, realistic, small next-step suggestions.",
+    "You are a gentle cognitive reframing companion. Help the user see a painful situation from a kinder, more balanced angle without invalidating it. Distinguish facts from assumptions, mistakes from identity, responsibility from self-blame, and temporary feelings from permanent conclusions. Do not assume every message is about regret, and never say 'just think positively' or 'just forget about it.'",
+  help: "You are a supportive, practical guide. Respond to the actual problem the user described and offer one or two concrete, realistic next steps only when they would help. Make the next step small enough to begin today.",
   private: "Reflect gently without storing long-term memory.",
 };
+
+function responseVariant(text: string, mode: Mode) {
+  let hash = 0;
+  for (const character of `${mode}:${text.toLowerCase()}`) {
+    hash = (hash * 31 + character.charCodeAt(0)) % 997;
+  }
+  return hash % 3;
+}
 
 function replyFor(mode: Mode, text: string, memoryFacts?: string[]) {
   const cleanText = text.trim().replace(/\s+/g, " ");
@@ -175,32 +183,142 @@ function replyFor(mode: Mode, text: string, memoryFacts?: string[]) {
       ? `${cleanText.slice(0, 177).trimEnd()}…`
       : cleanText;
   const quoted = `“${excerpt}”`;
-  const subjectSeparator = /[.!?]$/.test(excerpt) ? " " : ", ";
-  const emotion = emotionFor(text);
-  const isGreeting = /^(hi|hello|hey|good morning|good evening)\b[!.? ]*$/i.test(cleanText);
+  const lower = cleanText.toLowerCase();
+  const variant = responseVariant(cleanText, mode);
+  const isGreeting =
+    /^(hi|hello|hey|good morning|good evening|how are you(?: doing)?)\b[!.? ]*$/i.test(
+      cleanText,
+    );
   const isFarewell = /^(bye|goodbye|see you|take care)\b[!.? ]*$/i.test(cleanText);
+  const isPositive =
+    /(good day|great day|happy|glad|excited|grateful|proud|relieved|something good happened|feeling better)/.test(
+      lower,
+    );
+  const isLonely = /(lonely|alone|isolated|nobody|no one understands)/.test(lower);
+  const isSad = /(sad|cry|grief|heartbreak|empty|hopeless|depressed|down|tears)/.test(
+    lower,
+  );
+  const isExamOrFailure =
+    /(failed|failure|exam|disappointed|let everyone down)/.test(lower);
+  const isMistakeOrRegret = /(mistake|messed up|regret|replaying)/.test(lower);
+  const isFailureOrMistake = isExamOrFailure || isMistakeOrRegret;
+  const isOverthinking =
+    /(overthink|keep thinking|thought loop|mind won't stop|can't stop thinking|racing thoughts)/.test(
+      lower,
+    );
+  const isOverwhelmed =
+    /(overwhelmed|too much|can't cope|can't handle|buried|swamped|everything at once)/.test(
+      lower,
+    );
+  const isFutureFear =
+    /(scared|afraid|anxious|worried|worry|future|what if|uncertain)/.test(lower);
   let base: string;
 
   if (isGreeting) {
     base =
       mode === "help"
         ? "Hi. I’m here. What would you like help making a little easier?"
-        : "Hi. I’m here with you. How are you arriving today?";
+        : variant === 0
+          ? "Hi. I’m here. How are you arriving today?"
+          : "Hey. Take your time—what’s on your mind?";
   } else if (isFarewell) {
-    base = "Take care. You can come back whenever you want to continue this.";
-  } else if (mode === "listen") {
     base =
-      emotion === "neutral"
-        ? `I hear you saying ${quoted} I’m here with you; you don’t need to make it more polished than that.`
-        : `I hear you saying ${quoted} ${emotion} may be part of what is here, and you don’t have to solve it all right now.`;
+      variant === 0
+        ? "Take care. You can come back whenever you want to continue this."
+        : "I’m glad you stopped by. Be gentle with yourself, and come back whenever you want.";
+  } else if (mode === "listen") {
+    if (isPositive) {
+      base =
+        variant === 0
+          ? "I’m glad today gave you something good. What made it feel that way?"
+          : "That sounds like a welcome change of pace. What part of the day are you still carrying with you?";
+    } else if (isLonely) {
+      base =
+        variant === 0
+          ? "I’m sorry it feels so lonely right now. You don’t have to pretend otherwise here. What has been making the distance feel strongest?"
+          : "That kind of loneliness can make an ordinary day feel very heavy. Do you want to tell me what you’ve been missing most?";
+    } else if (isSad) {
+      base =
+        variant === 0
+          ? "I’m sorry you’re feeling this way. You don’t have to pretend you’re okay here. If you want, tell me what happened."
+          : "That sounds painful to be carrying. You can give it to me in pieces—what part hurts the most right now?";
+    } else if (isExamOrFailure) {
+      base =
+        variant === 0
+          ? "That kind of result can really sting, especially when you cared about how it would go. What part of it is weighing on you most?"
+          : "It makes sense that this is still taking up space. You don’t have to turn the whole experience into a verdict about yourself here.";
+    } else if (isMistakeOrRegret) {
+      base =
+        variant === 0
+          ? "It’s exhausting when a mistake keeps replaying after the moment has passed. What part keeps coming back to you?"
+          : "You can take something useful from what happened without making yourself relive it as punishment. What are you being hardest on yourself about?";
+    } else if (isOverthinking || isOverwhelmed || isFutureFear) {
+      base =
+        variant === 0
+          ? "That sounds like a lot to be holding in your head at once. You can start with the part that feels most immediate."
+          : "It sounds exhausting to have this following you around. What keeps pulling your attention back to it?";
+    } else {
+      base =
+        variant === 0
+          ? "Thank you for putting that into words. I’m here with you—what part feels hardest to carry?"
+          : "You can say this in whatever shape it comes. I’m listening for what matters most to you in it.";
+    }
   } else if (mode === "understand") {
-    base = `You said ${quoted} What part of that feels most present or important when you pause with it for a moment?`;
+    if (isFailureOrMistake) {
+      base =
+        "When you think about what happened, is the sharper pain the result itself, what you think it says about you, or how someone else may respond?";
+    } else if (isLonely) {
+      base =
+        "When you say lonely, is it more about missing a particular person, feeling unseen, or not having anyone you can be fully honest with?";
+    } else if (isOverthinking || isOverwhelmed) {
+      base =
+        "What does your mind keep returning to when it starts running in circles? Sometimes the repeated thought points toward what you need most.";
+    } else if (isFutureFear) {
+      base =
+        "What part of the future feels most frightening—the uncertainty, a specific possibility, or the feeling that you may not be ready for it?";
+    } else {
+      base =
+        variant === 0
+          ? "There may be more than one thing happening underneath this. Which part feels easiest to name, even if it isn’t the deepest part?"
+          : `As you sit with ${quoted}, what do you notice yourself needing from the situation right now?`;
+    }
   } else if (mode === "reframe") {
-    base = `You said ${quoted} A kinder way to hold this might be to notice what the situation is asking of you now, without turning it into a verdict about who you are. What feels different when you look at it that way?`;
+    if (isFailureOrMistake) {
+      base =
+        "A painful result can be real without becoming a definition of you. What belongs to the facts of what happened, and what is your self-criticism adding on top?";
+    } else if (/(ahead of|behind|comparison|everyone else|not good enough)/.test(lower)) {
+      base =
+        "Seeing someone else’s progress does not give you the full story of your own. What would change if you treated your current place as information, not a verdict?";
+    } else {
+      base =
+        variant === 0
+          ? "Let’s separate what happened from the conclusion your mind is drawing about you. Which part is a fact, and which part might be fear speaking?"
+          : "A kinder perspective does not have to deny what hurts. It can make room for the difficulty without letting this one moment become the whole story.";
+    }
   } else if (mode === "help") {
-    base = `For ${quoted}${subjectSeparator}let’s keep the next step small:\n1. Name the one outcome you need most today.\n2. Choose one action that takes ten minutes or less toward it.\nWhich part would be most useful to start with?`;
+    if (isOverthinking) {
+      base =
+        "For the thought loop, try putting one sentence on paper: “I’m worried that…” Then write one thing you know for sure and one small action available today. That gives your mind somewhere to put the worry.";
+    } else if (isOverwhelmed) {
+      base =
+        "When everything feels urgent, write down the whole pile and circle only the next ten-minute task. Start there, not with the entire problem.";
+    } else if (isFailureOrMistake) {
+      base =
+        "Give yourself ten minutes to name what happened without judging yourself, then choose one useful lesson or repair step. You only need to work on the next piece today.";
+    } else if (isFutureFear) {
+      base =
+        "Name the specific part you can influence this week, then choose one small preparation step. Let the rest stay outside today’s task list for now.";
+    } else {
+      base =
+        variant === 0
+          ? "Let’s make this smaller. What is the one outcome that would help most today? Choose a first step you could begin in ten minutes."
+          : `Start with ${quoted} as the whole problem for now. What is one part you can influence before the day ends?`;
+    }
   } else {
-    base = `I’ll keep ${quoted} here with you. This can stay unfinished and private; you don’t have to explain it further.`;
+    base =
+      variant === 0
+        ? "You can leave the unedited version here. This can stay unfinished and private."
+        : "There is no need to turn this into a neat explanation. Say as much or as little as feels right.";
   }
 
   if (memoryFacts && memoryFacts.length > 0) {
@@ -208,7 +326,7 @@ function replyFor(mode: Mode, text: string, memoryFacts?: string[]) {
       .replace(/^user\s+is\s+/i, "you are ")
       .replace(/^user\s+has\s+/i, "you have ")
       .replace(/^user\s+/i, "you ");
-    return `${base}\n\nI’m also gently keeping in mind that ${factText}. You don't have to carry that alone.`;
+    return `${base}\n\nI’m keeping in mind that ${factText}.`;
   }
 
   return base;
