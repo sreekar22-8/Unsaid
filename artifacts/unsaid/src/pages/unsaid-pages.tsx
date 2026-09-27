@@ -23,7 +23,7 @@ import {
   useUpdateJournalEntry,
   useUpdateMemorySettings,
 } from '@workspace/api-client-react';
-import type { ConversationMode, EmotionDetection, JournalEntry } from '@workspace/api-client-react';
+import type { ConversationMode, EmotionDetection, JournalEntry, Message } from '@workspace/api-client-react';
 import { AppShell, Button, EmptyState, ErrorNotice, formatDate, LoadingBlocks, LoadingSpinner, PageHeading, Toggle } from '@/components/unsaid-ui';
 import { ChatWindow, detectLocalEmotions, EmotionBadge } from '@/components/chat-window';
 import { supabase } from '@/lib/supabase';
@@ -91,7 +91,18 @@ export function CompanionPage() {
     const send = (conversationId: number) => {
       sendMessage.mutate({ conversationId, data: { content, mode } }, {
         onSuccess: (nextMessages) => {
-          client.setQueryData(getListMessagesQueryKey(conversationId), nextMessages);
+          client.setQueryData<Message[]>(
+            getListMessagesQueryKey(conversationId),
+            (previous = []) => {
+              const byId = new Map(previous.map((message) => [message.id, message]));
+              nextMessages.forEach((message) => byId.set(message.id, message));
+              return [...byId.values()].sort(
+                (a, b) =>
+                  new Date(a.createdAt).getTime() -
+                  new Date(b.createdAt).getTime(),
+              );
+            },
+          );
           setDraft('');
           setNotice('');
         },

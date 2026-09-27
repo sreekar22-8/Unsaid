@@ -141,7 +141,14 @@ function privateNoteView(row: typeof privateNotesTable.$inferSelect) {
 }
 
 function emotionFor(text: string) {
-  const lower = text.toLowerCase();
+  const lower = text.toLowerCase().trim();
+  if (
+    /^(hi|hello|hey|good morning|good evening|bye|goodbye|see you|take care)\b[!.? ]*$/i.test(
+      lower,
+    )
+  ) {
+    return "neutral";
+  }
   if (/(angry|mad|frustrat|irritat|furious)/.test(lower)) return "frustrated";
   if (/(sad|lonely|empty|miss|cry|grief)/.test(lower)) return "sad";
   if (/(anxious|worry|worried|nervous|overwhelm|panic)/.test(lower))
@@ -168,6 +175,7 @@ function replyFor(mode: Mode, text: string, memoryFacts?: string[]) {
       ? `${cleanText.slice(0, 177).trimEnd()}…`
       : cleanText;
   const quoted = `“${excerpt}”`;
+  const subjectSeparator = /[.!?]$/.test(excerpt) ? " " : ", ";
   const emotion = emotionFor(text);
   const isGreeting = /^(hi|hello|hey|good morning|good evening)\b[!.? ]*$/i.test(cleanText);
   const isFarewell = /^(bye|goodbye|see you|take care)\b[!.? ]*$/i.test(cleanText);
@@ -183,14 +191,14 @@ function replyFor(mode: Mode, text: string, memoryFacts?: string[]) {
   } else if (mode === "listen") {
     base =
       emotion === "neutral"
-        ? `I hear you saying ${quoted}. I’m here with you; you don’t need to make it more polished than that.`
-        : `I hear you saying ${quoted}. ${emotion} may be part of what is here, and you don’t have to solve it all right now.`;
+        ? `I hear you saying ${quoted} I’m here with you; you don’t need to make it more polished than that.`
+        : `I hear you saying ${quoted} ${emotion} may be part of what is here, and you don’t have to solve it all right now.`;
   } else if (mode === "understand") {
-    base = `You said ${quoted}. What part of that feels most present or important when you pause with it for a moment?`;
+    base = `You said ${quoted} What part of that feels most present or important when you pause with it for a moment?`;
   } else if (mode === "reframe") {
-    base = `You said ${quoted}. A kinder way to hold this might be to notice what the situation is asking of you now, without turning it into a verdict about who you are. What feels different when you look at it that way?`;
+    base = `You said ${quoted} A kinder way to hold this might be to notice what the situation is asking of you now, without turning it into a verdict about who you are. What feels different when you look at it that way?`;
   } else if (mode === "help") {
-    base = `For ${quoted}, let’s keep the next step small:\n1. Name the one outcome you need most today.\n2. Choose one action that takes ten minutes or less toward it.\nWhich part would be most useful to start with?`;
+    base = `For ${quoted}${subjectSeparator}let’s keep the next step small:\n1. Name the one outcome you need most today.\n2. Choose one action that takes ten minutes or less toward it.\nWhich part would be most useful to start with?`;
   } else {
     base = `I’ll keep ${quoted} here with you. This can stay unfinished and private; you don’t have to explain it further.`;
   }
@@ -609,6 +617,7 @@ router.post(
   "/companion/conversations/:conversationId/messages",
   async (req, res, next) => {
     try {
+      const userId = await getUserFromRequest(req);
       const { conversationId } = SendMessageParams.parse({
         conversationId: Number(req.params.conversationId),
       });
@@ -618,7 +627,14 @@ router.post(
       const [conversation] = await db
         .select()
         .from(conversationsTable)
-        .where(eq(conversationsTable.id, conversationId))
+        .where(
+          and(
+            eq(conversationsTable.id, conversationId),
+            userId
+              ? eq(conversationsTable.userId, userId)
+              : isNull(conversationsTable.userId),
+          ),
+        )
         .limit(1);
 
       if (!conversation) {
@@ -626,8 +642,9 @@ router.post(
         return;
       }
 
-      const userEmotion = emotionFor(content);
       const mode = (requestedMode || conversation.mode || "listen") as Mode;
+      const classifiedEmotions = await classifyEmotions(content);
+      const userEmotion = emotionFor(content);
 
       const [userMessage] = await db
         .insert(messagesTable)
@@ -636,18 +653,11 @@ router.post(
           role: "user",
           content,
           emotion: userEmotion,
+          userId,
         })
         .returning();
 
-      void saveEmotionTags(
-        userMessage,
-        userMessage.userId || conversation.userId || null,
-        content,
-      ).catch(() => {});
-
-      const approvedFacts = await getApprovedMemoryFacts(
-        userMessage.userId || conversation.userId || null,
-      );
+      await saveEmotionTags(userMessage, userId, classifiedEmotions);
 
       const recentHistory = await db
         .select({
@@ -655,15 +665,26 @@ router.post(
           content: messagesTable.content,
         })
         .from(messagesTable)
-        .where(eq(messagesTable.conversationId, conversationId))
-        .orderBy(messagesTable.createdAt)
-        .limit(8);
+        .where(
+          and(
+            eq(messagesTable.conversationId, conversationId),
+            userId
+              ? eq(messagesTable.userId, userId)
+              : isNull(messagesTable.userId),
+            lt(messagesTable.id, userMessage.id),
+          ),
+        )
+        .orderBy(desc(messagesTable.id))
+        .limit(6);
+
+      const approvedFacts = await getApprovedMemoryFacts(userId);
 
       const replyContent = await generateCompanionReply(
         mode,
         content,
         approvedFacts,
-        recentHistory,
+        recentHistory.reverse(),
+        userEmotion,
       );
 
       const [assistantMessage] = await db
@@ -673,13 +694,21 @@ router.post(
           role: "assistant",
           content: replyContent,
           emotion: userEmotion,
+          userId,
         })
         .returning();
 
       await db
         .update(conversationsTable)
         .set({ updatedAt: new Date() })
-        .where(eq(conversationsTable.id, conversationId));
+        .where(
+          and(
+            eq(conversationsTable.id, conversationId),
+            userId
+              ? eq(conversationsTable.userId, userId)
+              : isNull(conversationsTable.userId),
+          ),
+        );
 
       if (requestedMode && requestedMode !== conversation.mode) {
         await db
@@ -688,39 +717,41 @@ router.post(
             mode: requestedMode,
             updatedAt: new Date(),
           })
-          .where(eq(conversationsTable.id, conversationId));
+          .where(
+            and(
+              eq(conversationsTable.id, conversationId),
+              userId
+                ? eq(conversationsTable.userId, userId)
+                : isNull(conversationsTable.userId),
+            ),
+          );
       }
 
       // AI memory fact suggestion - saved as UNAPPROVED (approved = false)
-      extractMemoryFacts(content, mode)
-        .then(async (facts) => {
-          if (facts.length > 0) {
-            await db.insert(memoryItemsTable).values(
-              facts.map((fact) => ({
-                userId: userMessage.userId || conversation.userId || null,
-                fact,
-                approved: false,
-              })),
-            );
-          }
-        })
-        .catch(() => {});
-
-      // AI emotion classification - saves 1-3 emotion tags linked to the user message
-      classifyEmotions(content)
-        .then(async (tags) => {
-          if (tags.length > 0) {
-            await db.insert(emotionTagsTable).values(
-              tags.map((tag) => ({
-                messageId: userMessage.id,
-                userId: userMessage.userId || conversation.userId || null,
-                emotion: tag.emotion,
-                intensity: tag.intensity,
-              })),
-            );
-          }
-        })
-        .catch(() => {});
+      if (mode !== "private") {
+        extractMemoryFacts(
+          content,
+          mode,
+          recentHistory.map((message) => `${message.role}: ${message.content}`),
+        )
+          .then(async (facts) => {
+            if (facts.length > 0) {
+              await db.insert(memoryItemsTable).values(
+                facts.map((fact) => ({
+                  userId,
+                  fact,
+                  approved: false,
+                })),
+              );
+            }
+          })
+          .catch((error) =>
+            logger.warn(
+              { error: error instanceof Error ? error.message : String(error) },
+              "Memory extraction failed",
+            ),
+          );
+      }
 
       res.json([messageView(userMessage), messageView(assistantMessage)]);
     } catch (error) {
@@ -731,19 +762,23 @@ router.post(
 
 router.post("/companion/emotions/detect", async (req, res, next) => {
   try {
+    await getUserFromRequest(req);
     const { content } = DetectEmotionBody.parse(req.body);
 
-    const primary = emotionFor(content);
+    const classified = await classifyEmotions(content);
+    const primary = classified[0]?.emotion || emotionFor(content);
 
-    const secondary =
-      primary === "uncertain"
-        ? ["tenderness", "overthinking"]
-        : ["self-protection", "hope"];
+    const secondary = classified
+      .slice(1)
+      .map((item) => item.emotion)
+      .concat(primary === "neutral" ? ["uncertainty"] : ["self-protection"])
+      .slice(0, 2);
+    const intensity = classified[0]?.intensity ?? 0.2;
 
     res.json({
       primary,
       secondary,
-      intensity: Math.min(0.94, Math.max(0.42, content.length / 150)),
+      intensity,
       signals: ["word choice", "pace", "what is left unsaid"],
       reflection: `It sounds like ${primary} may be sharing space with something you haven't fully named yet.`,
     });
@@ -752,13 +787,19 @@ router.post("/companion/emotions/detect", async (req, res, next) => {
   }
 });
 
-router.get("/companion/journal", async (_req, res, next) => {
+router.get("/companion/journal", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     await ensureSeed();
 
     const rows = await db
       .select()
       .from(journalEntriesTable)
+      .where(
+        userId
+          ? eq(journalEntriesTable.userId, userId)
+          : isNull(journalEntriesTable.userId),
+      )
       .orderBy(desc(journalEntriesTable.createdAt));
 
     res.json(rows.map(journalView));
@@ -769,6 +810,7 @@ router.get("/companion/journal", async (_req, res, next) => {
 
 router.post("/companion/journal", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     const input = CreateJournalEntryBody.parse(req.body);
 
     const rawDetected = emotionFor(input.content);
@@ -788,6 +830,7 @@ router.post("/companion/journal", async (req, res, next) => {
         mood: finalMood,
         moodTag: finalMood,
         entryType: input.entryType || "open",
+        userId,
       })
       .returning();
 
@@ -799,6 +842,7 @@ router.post("/companion/journal", async (req, res, next) => {
 
 router.patch("/companion/journal/:entryId", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     const { entryId } = UpdateJournalEntryParams.parse({
       entryId: Number(req.params.entryId),
     });
@@ -819,7 +863,14 @@ router.patch("/companion/journal/:entryId", async (req, res, next) => {
           : { entryType: input.entryType }),
         updatedAt: new Date(),
       })
-      .where(eq(journalEntriesTable.id, entryId))
+      .where(
+        and(
+          eq(journalEntriesTable.id, entryId),
+          userId
+            ? eq(journalEntriesTable.userId, userId)
+            : isNull(journalEntriesTable.userId),
+        ),
+      )
       .returning();
 
     if (!row) {
@@ -835,13 +886,21 @@ router.patch("/companion/journal/:entryId", async (req, res, next) => {
 
 router.delete("/companion/journal/:entryId", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     const { entryId } = DeleteJournalEntryParams.parse({
       entryId: Number(req.params.entryId),
     });
 
     await db
       .delete(journalEntriesTable)
-      .where(eq(journalEntriesTable.id, entryId));
+      .where(
+        and(
+          eq(journalEntriesTable.id, entryId),
+          userId
+            ? eq(journalEntriesTable.userId, userId)
+            : isNull(journalEntriesTable.userId),
+        ),
+      );
 
     res.status(204).end();
   } catch (error) {
@@ -905,39 +964,59 @@ router.delete("/companion/memory/:memoryId", async (req, res, next) => {
 });
 
 async function buildDashboard(
+  userId: string | null = null,
   conversationCount?: number,
   journalCount?: number,
   existingMessages?: Array<typeof messagesTable.$inferSelect>,
 ) {
+  const conversationScope = userId
+    ? eq(conversationsTable.userId, userId)
+    : isNull(conversationsTable.userId);
+  const journalScope = userId
+    ? eq(journalEntriesTable.userId, userId)
+    : isNull(journalEntriesTable.userId);
+  const messageScope = userId
+    ? eq(messagesTable.userId, userId)
+    : isNull(messagesTable.userId);
+  const emotionScope = userId
+    ? eq(emotionTagsTable.userId, userId)
+    : isNull(emotionTagsTable.userId);
+
   const [conversations, journals, messages, emotionTagRows] = await Promise.all([
     conversationCount === undefined
-      ? db.select().from(conversationsTable)
+      ? db.select().from(conversationsTable).where(conversationScope)
       : Promise.resolve([]),
 
     journalCount === undefined
-      ? db.select().from(journalEntriesTable)
+      ? db.select().from(journalEntriesTable).where(journalScope)
       : Promise.resolve([]),
 
     existingMessages
       ? Promise.resolve(existingMessages)
-      : db.select().from(messagesTable),
+      : db.select().from(messagesTable).where(messageScope),
 
-    db.select().from(emotionTagsTable),
+    db.select().from(emotionTagsTable).where(emotionScope),
   ]);
 
   const allMessages = existingMessages ?? messages;
+  const userMessages = allMessages.filter((message) => message.role === "user");
 
   const counts = new Map<string, number>();
+  const taggedMessageIds = new Set(emotionTagRows.map((tag) => tag.messageId));
+  const countedTags = new Set<string>();
 
-  // Count from the single-emotion field on messages
-  allMessages.forEach((message) => {
-    if (message.emotion && message.role === "user") {
+  // Use classified tags when available and the message's primary emotion only
+  // when classification has not produced tags. This prevents double-counting.
+  userMessages.forEach((message) => {
+    if (message.emotion && !taggedMessageIds.has(message.id)) {
       counts.set(message.emotion, (counts.get(message.emotion) ?? 0) + 1);
     }
   });
 
-  // Also count from the richer AI-classified emotion_tags table
   emotionTagRows.forEach((tag) => {
+    const tagKey = `${tag.messageId}:${tag.emotion.toLowerCase()}`;
+    if (countedTags.has(tagKey)) return;
+    countedTags.add(tagKey);
     const key = tag.emotion.toLowerCase();
     counts.set(key, (counts.get(key) ?? 0) + 1);
   });
@@ -953,39 +1032,77 @@ async function buildDashboard(
       color: palette[index],
     }));
 
+  const intensityByMessage = new Map<number, number>();
+  emotionTagRows.forEach((tag) => {
+    intensityByMessage.set(
+      tag.messageId,
+      Math.max(intensityByMessage.get(tag.messageId) ?? 0, tag.intensity),
+    );
+  });
+
+  const dateKey = (date: Date) => date.toISOString().slice(0, 10);
+  const today = new Date();
+  today.setUTCHours(0, 0, 0, 0);
+  const messagesByDate = new Map<string, number[]>();
+  userMessages.forEach((message) => {
+    const key = dateKey(message.createdAt);
+    const values = messagesByDate.get(key) ?? [];
+    values.push(intensityByMessage.get(message.id) ?? (message.emotion === "neutral" ? 0.2 : 0.5));
+    messagesByDate.set(key, values);
+  });
+
+  const datedCheckIns = new Set(userMessages.map((message) => dateKey(message.createdAt)));
+  let streak = 0;
+  let streakDate = new Date(today);
+  if (!datedCheckIns.has(dateKey(streakDate))) {
+    const latest = userMessages
+      .map((message) => new Date(message.createdAt))
+      .sort((a, b) => b.getTime() - a.getTime())[0];
+    if (latest) {
+      streakDate = latest;
+      streakDate.setUTCHours(0, 0, 0, 0);
+    }
+  }
+  while (datedCheckIns.has(dateKey(streakDate))) {
+    streak += 1;
+    streakDate.setUTCDate(streakDate.getUTCDate() - 1);
+  }
+
+  const weeklyIntensity = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(today);
+    date.setUTCDate(today.getUTCDate() - (6 - index));
+    const values = messagesByDate.get(dateKey(date)) ?? [];
+    const value = values.length
+      ? values.reduce((sum, item) => sum + item, 0) / values.length
+      : 0;
+    return {
+      day: date.toLocaleDateString("en-US", { weekday: "short", timeZone: "UTC" }).slice(0, 1),
+      value: Number(value.toFixed(2)),
+    };
+  });
+
   return {
-    checkIns: allMessages.filter((message) => message.role === "user").length,
+    checkIns: userMessages.length,
 
     journalEntries: journalCount ?? journals.length,
 
     conversations: conversationCount ?? conversations.length,
 
-    streak: 4,
+    streak,
 
-    topEmotions: topEmotions.length
-      ? topEmotions
-      : [
-          {
-            emotion: "uncertain",
-            count: 1,
-            color: palette[0],
-          },
-        ],
+    topEmotions,
 
-    weeklyIntensity: ["M", "T", "W", "T", "F", "S", "S"].map((day, index) => ({
-      day,
-      value: [0.42, 0.61, 0.48, 0.76, 0.57, 0.36, 0.29][index],
-    })),
+    weeklyIntensity,
   };
 }
 
 router.post("/chat", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     const {
       content,
       conversationId: reqId,
       mode: requestedMode,
-      userId: reqUserId,
     } = req.body ?? {};
 
     let conversationId = reqId ? Number(reqId) : null;
@@ -995,13 +1112,16 @@ router.post("/chat", async (req, res, next) => {
       [conversation] = await db
         .select()
         .from(conversationsTable)
-        .where(eq(conversationsTable.id, conversationId))
+        .where(
+          and(
+            eq(conversationsTable.id, conversationId),
+            userId
+              ? eq(conversationsTable.userId, userId)
+              : isNull(conversationsTable.userId),
+          ),
+        )
         .limit(1);
     }
-
-    const effectiveUserId = reqUserId
-      ? String(reqUserId)
-      : (conversation?.userId ?? null);
 
     if (!conversation) {
       [conversation] = await db
@@ -1009,7 +1129,7 @@ router.post("/chat", async (req, res, next) => {
         .values({
           title: (content || "A new conversation").slice(0, 34),
           mode: requestedMode || "listen",
-          userId: effectiveUserId,
+          userId,
         })
         .returning();
 
@@ -1018,6 +1138,7 @@ router.post("/chat", async (req, res, next) => {
 
     const mode = (requestedMode || conversation.mode || "listen") as Mode;
 
+    const classifiedEmotions = await classifyEmotions(content || "");
     const userEmotion = emotionFor(content || "");
 
     const [userMessage] = await db
@@ -1027,34 +1148,39 @@ router.post("/chat", async (req, res, next) => {
         role: "user",
         content: content || "",
         emotion: userEmotion,
-        userId: effectiveUserId,
+        userId,
       })
       .returning();
 
-    void saveEmotionTags(
-      userMessage,
-      effectiveUserId,
-      content || "",
-    ).catch(() => {});
+    await saveEmotionTags(userMessage, userId, classifiedEmotions);
 
     // Include the user's approved memory_items as context for the AI (never private_notes)
-    const approvedFacts = await getApprovedMemoryFacts(effectiveUserId);
-
     const recentHistory = await db
       .select({
         role: messagesTable.role,
         content: messagesTable.content,
       })
       .from(messagesTable)
-      .where(eq(messagesTable.conversationId, conversation.id))
-      .orderBy(messagesTable.createdAt)
-      .limit(8);
+        .where(
+          and(
+            eq(messagesTable.conversationId, conversation.id),
+            userId
+              ? eq(messagesTable.userId, userId)
+              : isNull(messagesTable.userId),
+            lt(messagesTable.id, userMessage.id),
+          ),
+        )
+        .orderBy(desc(messagesTable.id))
+        .limit(6);
+
+    const approvedFacts = await getApprovedMemoryFacts(userId);
 
     const replyContent = await generateCompanionReply(
       mode,
       content || "",
       approvedFacts,
-      recentHistory,
+      recentHistory.reverse(),
+      userEmotion,
     );
 
     const [assistantMessage] = await db
@@ -1064,7 +1190,7 @@ router.post("/chat", async (req, res, next) => {
         role: "assistant",
         content: replyContent,
         emotion: userEmotion,
-        userId: effectiveUserId,
+        userId,
       })
       .returning();
 
@@ -1074,38 +1200,40 @@ router.post("/chat", async (req, res, next) => {
         mode,
         updatedAt: new Date(),
       })
-      .where(eq(conversationsTable.id, conversation.id));
+      .where(
+        and(
+          eq(conversationsTable.id, conversation.id),
+          userId
+            ? eq(conversationsTable.userId, userId)
+            : isNull(conversationsTable.userId),
+        ),
+      );
 
     // AI memory fact suggestion - saved as UNAPPROVED (approved = false)
-    extractMemoryFacts(content || "", mode)
-      .then(async (facts) => {
-        if (facts.length > 0) {
-          await db.insert(memoryItemsTable).values(
-            facts.map((fact) => ({
-              userId: userMessage.userId || null,
-              fact,
-              approved: false,
-            })),
-          );
-        }
-      })
-      .catch(() => {});
-
-    // AI emotion classification - saves 1-3 emotion tags linked to the user message
-    classifyEmotions(content || "")
-      .then(async (tags) => {
-        if (tags.length > 0) {
-          await db.insert(emotionTagsTable).values(
-            tags.map((tag) => ({
-              messageId: userMessage.id,
-              userId: userMessage.userId || null,
-              emotion: tag.emotion,
-              intensity: tag.intensity,
-            })),
-          );
-        }
-      })
-      .catch(() => {});
+    if (mode !== "private") {
+      extractMemoryFacts(
+        content || "",
+        mode,
+        recentHistory.map((message) => `${message.role}: ${message.content}`),
+      )
+        .then(async (facts) => {
+          if (facts.length > 0) {
+            await db.insert(memoryItemsTable).values(
+              facts.map((fact) => ({
+                userId,
+                fact,
+                approved: false,
+              })),
+            );
+          }
+        })
+        .catch((error) =>
+          logger.warn(
+            { error: error instanceof Error ? error.message : String(error) },
+            "Memory extraction failed",
+          ),
+        );
+    }
 
     res.json({
       conversationId,
@@ -1123,12 +1251,37 @@ router.get(
   "/companion/messages/:messageId/emotion-tags",
   async (req, res, next) => {
     try {
+      const userId = await getUserFromRequest(req);
       const messageId = Number(req.params.messageId);
+
+      const [message] = await db
+        .select({ id: messagesTable.id })
+        .from(messagesTable)
+        .where(
+          and(
+            eq(messagesTable.id, messageId),
+            userId
+              ? eq(messagesTable.userId, userId)
+              : isNull(messagesTable.userId),
+          ),
+        )
+        .limit(1);
+      if (!message) {
+        res.status(404).json({ error: "Message not found" });
+        return;
+      }
 
       const rows = await db
         .select()
         .from(emotionTagsTable)
-        .where(eq(emotionTagsTable.messageId, messageId))
+        .where(
+          and(
+            eq(emotionTagsTable.messageId, messageId),
+            userId
+              ? eq(emotionTagsTable.userId, userId)
+              : isNull(emotionTagsTable.userId),
+          ),
+        )
         .orderBy(desc(emotionTagsTable.intensity));
 
       res.json(
@@ -1148,12 +1301,37 @@ router.get(
   "/companion/conversations/:conversationId/emotion-tags",
   async (req, res, next) => {
     try {
+      const userId = await getUserFromRequest(req);
       const conversationId = Number(req.params.conversationId);
+
+      const [conversation] = await db
+        .select({ id: conversationsTable.id })
+        .from(conversationsTable)
+        .where(
+          and(
+            eq(conversationsTable.id, conversationId),
+            userId
+              ? eq(conversationsTable.userId, userId)
+              : isNull(conversationsTable.userId),
+          ),
+        )
+        .limit(1);
+      if (!conversation) {
+        res.status(404).json({ error: "Conversation not found" });
+        return;
+      }
 
       const messages = await db
         .select({ id: messagesTable.id })
         .from(messagesTable)
-        .where(eq(messagesTable.conversationId, conversationId));
+        .where(
+          and(
+            eq(messagesTable.conversationId, conversationId),
+            userId
+              ? eq(messagesTable.userId, userId)
+              : isNull(messagesTable.userId),
+          ),
+        );
 
       if (messages.length === 0) {
         res.json([]);
@@ -1246,17 +1424,18 @@ router.patch(["/companion/memory-items/:id", "/companion/memory-items/:id/approv
     const [existing] = await db
       .select()
       .from(memoryItemsTable)
-      .where(eq(memoryItemsTable.id, id))
+      .where(
+        and(
+          eq(memoryItemsTable.id, id),
+          userId
+            ? eq(memoryItemsTable.userId, userId)
+            : isNull(memoryItemsTable.userId),
+        ),
+      )
       .limit(1);
 
     if (!existing) {
       res.status(404).json({ error: "Memory item not found" });
-      return;
-    }
-
-    // Ownership check: authenticated user must own this item
-    if (existing.userId !== null && existing.userId !== userId) {
-      res.status(403).json({ error: "Forbidden" });
       return;
     }
 
@@ -1278,7 +1457,14 @@ router.patch(["/companion/memory-items/:id", "/companion/memory-items/:id/approv
     const [updated] = await db
       .update(memoryItemsTable)
       .set(updates)
-      .where(and(eq(memoryItemsTable.id, id), userId ? eq(memoryItemsTable.userId, userId) : isNull(memoryItemsTable.userId)))
+      .where(
+        and(
+          eq(memoryItemsTable.id, id),
+          userId
+            ? eq(memoryItemsTable.userId, userId)
+            : isNull(memoryItemsTable.userId),
+        ),
+      )
       .returning();
 
     if (!updated) {
@@ -1305,17 +1491,19 @@ router.delete("/companion/memory-items/:id", async (req, res, next) => {
     const [existing] = await db
       .select()
       .from(memoryItemsTable)
-      .where(eq(memoryItemsTable.id, id))
+      .where(
+        and(
+          eq(memoryItemsTable.id, id),
+          userId
+            ? eq(memoryItemsTable.userId, userId)
+            : isNull(memoryItemsTable.userId),
+        ),
+      )
       .limit(1);
 
     if (!existing) {
       // Already gone — treat as success
       res.status(204).end();
-      return;
-    }
-
-    if (existing.userId !== null && existing.userId !== userId) {
-      res.status(403).json({ error: "Forbidden" });
       return;
     }
 
@@ -1336,15 +1524,21 @@ router.delete("/companion/memory-items/:id", async (req, res, next) => {
   }
 });
 
-router.get("/companion/private-notes", async (_req, res, next) => {
+router.get("/companion/private-notes", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     const rows = await db
       .select()
       .from(privateNotesTable)
       .where(
-        or(
-          isNull(privateNotesTable.expiresAt),
-          gt(privateNotesTable.expiresAt, new Date()),
+        and(
+          userId
+            ? eq(privateNotesTable.userId, userId)
+            : isNull(privateNotesTable.userId),
+          or(
+            isNull(privateNotesTable.expiresAt),
+            gt(privateNotesTable.expiresAt, new Date()),
+          ),
         ),
       )
       .orderBy(desc(privateNotesTable.createdAt));
@@ -1357,11 +1551,13 @@ router.get("/companion/private-notes", async (_req, res, next) => {
 
 router.post("/companion/private-notes", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     const { content, isLetter, expiresAt } = req.body ?? {};
 
     const [row] = await db
       .insert(privateNotesTable)
       .values({
+        userId,
         content: content || "",
         isLetter: Boolean(isLetter),
         expiresAt: expiresAt ? new Date(expiresAt) : null,
@@ -1376,9 +1572,17 @@ router.post("/companion/private-notes", async (req, res, next) => {
 
 router.delete("/companion/private-notes/:noteId", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     const noteId = Number(req.params.noteId);
 
-    await db.delete(privateNotesTable).where(eq(privateNotesTable.id, noteId));
+    await db.delete(privateNotesTable).where(
+      and(
+        eq(privateNotesTable.id, noteId),
+        userId
+          ? eq(privateNotesTable.userId, userId)
+          : isNull(privateNotesTable.userId),
+      ),
+    );
 
     res.status(204).end();
   } catch (error) {
@@ -1386,10 +1590,11 @@ router.delete("/companion/private-notes/:noteId", async (req, res, next) => {
   }
 });
 
-router.get("/companion/dashboard", async (_req, res, next) => {
+router.get("/companion/dashboard", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     await ensureSeed();
-    res.json(await buildDashboard());
+    res.json(await buildDashboard(userId));
   } catch (error) {
     next(error);
   }

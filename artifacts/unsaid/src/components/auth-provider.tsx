@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import { setAuthTokenGetter } from '@workspace/api-client-react';
 import { supabase } from '@/lib/supabase';
 
 type AuthResult = {
@@ -23,6 +24,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let mounted = true;
+
+    setAuthTokenGetter(async () => {
+      const { data } = await supabase.auth.getSession();
+      return data.session?.access_token ?? null;
+    });
 
     const timeoutId = setTimeout(() => {
       if (mounted) {
@@ -58,6 +64,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       mounted = false;
       clearTimeout(timeoutId);
       authListener.subscription.unsubscribe();
+      setAuthTokenGetter(null);
     };
   }, []);
 
