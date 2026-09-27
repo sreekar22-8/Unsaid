@@ -136,15 +136,100 @@ async function getApprovedMemoryFacts(userId?: string | null): Promise<string[]>
       .select({ fact: memoryItemsTable.fact })
       .from(memoryItemsTable)
       .where(
-        userId
-          ? and(eq(memoryItemsTable.approved, true), eq(memoryItemsTable.userId, userId))
-          : eq(memoryItemsTable.approved, true)
+        and(
+          eq(memoryItemsTable.approved, true),
+          userId
+            ? eq(memoryItemsTable.userId, userId)
+            : isNull(memoryItemsTable.userId),
+        ),
       )
-      .limit(3);
+      .limit(5);
     return items.map((i) => i.fact);
   } catch {
     return [];
   }
+}
+
+async function generateCompanionReply(
+  mode: Mode,
+  content: string,
+  approvedFacts: string[] = [],
+  conversationHistory: Array<{ role: string; content: string }> = [],
+): Promise<string> {
+  // If private mode, memory is never used (reflects gently without storing or recalling long-term memory)
+  // Private notes are strictly excluded and never passed to the AI
+  const factsToUse = mode === "private" ? [] : approvedFacts;
+
+  const modePrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.listen;
+
+  let memoryContext = "";
+  if (factsToUse.length > 0) {
+    memoryContext = `\n\nApproved facts remembered about the user (use these naturally for empathy, context, and continuity — do not recite or list them mechanically):\n${factsToUse
+      .map((fact) => `- ${fact}`)
+      .join("\n")}`;
+  }
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey && content.trim()) {
+    const systemInstruction = `${modePrompt}${memoryContext}\n\nYou are Unsaid, a thoughtful, calm, empathetic companion. Speak with gentle warmth, clarity, and care.`;
+
+    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+    if (conversationHistory.length > 0) {
+      for (const msg of conversationHistory.slice(-6)) {
+        contents.push({
+          role: msg.role === "assistant" ? "model" : "user",
+          parts: [{ text: msg.content }],
+        });
+      }
+    }
+    contents.push({
+      role: "user",
+      parts: [{ text: content }],
+    });
+
+    const models = [
+      "gemini-3.8-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    for (const model of models) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": geminiKey,
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: systemInstruction }],
+            },
+            contents,
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 350,
+            },
+          }),
+        });
+
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text && text.trim()) {
+            return text.trim();
+          }
+        }
+      } catch {
+        // Fallback to next model or rule-based response
+      }
+    }
+  }
+
+  // Fallback to empathetic response incorporating approved memory facts
+  return replyFor(mode, content, factsToUse);
 }
 
 let schemaInitialized = false;
@@ -413,12 +498,33 @@ router.post(
         content,
       ).catch(() => {});
 
+      const approvedFacts = await getApprovedMemoryFacts(
+        userMessage.userId || conversation.userId || null,
+      );
+
+      const recentHistory = await db
+        .select({
+          role: messagesTable.role,
+          content: messagesTable.content,
+        })
+        .from(messagesTable)
+        .where(eq(messagesTable.conversationId, conversationId))
+        .orderBy(messagesTable.createdAt)
+        .limit(8);
+
+      const replyContent = await generateCompanionReply(
+        mode,
+        content,
+        approvedFacts,
+        recentHistory,
+      );
+
       const [assistantMessage] = await db
         .insert(messagesTable)
         .values({
           conversationId,
           role: "assistant",
-          content: replyFor(mode, content),
+          content: replyContent,
           emotion: userEmotion,
         })
         .returning();
@@ -732,6 +838,7 @@ router.post("/chat", async (req, res, next) => {
       content,
       conversationId: reqId,
       mode: requestedMode,
+      userId: reqUserId,
     } = req.body ?? {};
 
     let conversationId = reqId ? Number(reqId) : null;
@@ -745,12 +852,17 @@ router.post("/chat", async (req, res, next) => {
         .limit(1);
     }
 
+    const effectiveUserId = reqUserId
+      ? String(reqUserId)
+      : (conversation?.userId ?? null);
+
     if (!conversation) {
       [conversation] = await db
         .insert(conversationsTable)
         .values({
           title: (content || "A new conversation").slice(0, 34),
           mode: requestedMode || "listen",
+          userId: effectiveUserId,
         })
         .returning();
 
@@ -768,16 +880,35 @@ router.post("/chat", async (req, res, next) => {
         role: "user",
         content: content || "",
         emotion: userEmotion,
+        userId: effectiveUserId,
       })
       .returning();
 
     void saveEmotionTags(
       userMessage,
-      userMessage.userId || conversation.userId || null,
+      effectiveUserId,
       content || "",
     ).catch(() => {});
 
-    const replyContent = replyFor(mode, content || "");
+    // Include the user's approved memory_items as context for the AI (never private_notes)
+    const approvedFacts = await getApprovedMemoryFacts(effectiveUserId);
+
+    const recentHistory = await db
+      .select({
+        role: messagesTable.role,
+        content: messagesTable.content,
+      })
+      .from(messagesTable)
+      .where(eq(messagesTable.conversationId, conversation.id))
+      .orderBy(messagesTable.createdAt)
+      .limit(8);
+
+    const replyContent = await generateCompanionReply(
+      mode,
+      content || "",
+      approvedFacts,
+      recentHistory,
+    );
 
     const [assistantMessage] = await db
       .insert(messagesTable)
@@ -786,6 +917,7 @@ router.post("/chat", async (req, res, next) => {
         role: "assistant",
         content: replyContent,
         emotion: userEmotion,
+        userId: effectiveUserId,
       })
       .returning();
 
@@ -909,6 +1041,8 @@ router.get("/companion/memory-items", async (req, res, next) => {
 
     if (userId) {
       query = query.where(eq(memoryItemsTable.userId, userId)) as any;
+    } else {
+      query = query.where(isNull(memoryItemsTable.userId)) as any;
     }
 
     const rows = await query.orderBy(desc(memoryItemsTable.createdAt));
@@ -924,14 +1058,53 @@ router.get("/companion/memory-items", async (req, res, next) => {
   }
 });
 
+router.post("/companion/memory-items", async (req, res, next) => {
+  try {
+    const { fact, approved = false, userId = null } = req.body ?? {};
+    if (!fact || typeof fact !== "string" || !fact.trim()) {
+      res.status(400).json({ error: "Fact is required" });
+      return;
+    }
+
+    const [created] = await db
+      .insert(memoryItemsTable)
+      .values({
+        fact: fact.trim(),
+        approved: Boolean(approved),
+        userId: userId ? String(userId) : null,
+      })
+      .returning();
+
+    res.status(201).json({
+      ...created,
+      createdAt: created.createdAt.toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.patch(["/companion/memory-items/:id", "/companion/memory-items/:id/approve", "/companion/memory-items/:id/approval"], async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { approved = true } = req.body ?? {};
+    const { approved, fact } = req.body ?? {};
+
+    const updates: Record<string, any> = {};
+    if (typeof approved === "boolean") {
+      updates.approved = approved;
+    } else if (req.body?.approved !== undefined) {
+      updates.approved = Boolean(req.body.approved);
+    }
+    if (typeof fact === "string" && fact.trim()) {
+      updates.fact = fact.trim();
+    }
+    if (Object.keys(updates).length === 0) {
+      updates.approved = true;
+    }
 
     const [updated] = await db
       .update(memoryItemsTable)
-      .set({ approved: Boolean(approved) })
+      .set(updates)
       .where(eq(memoryItemsTable.id, id))
       .returning();
 

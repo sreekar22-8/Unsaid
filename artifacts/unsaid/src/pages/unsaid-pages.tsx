@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link } from 'wouter';
-import { ArrowUpRight, BarChart3, BookOpen, Check, ChevronDown, Clock3, Feather, Heart, LockKeyhole, MessageCircle, Plus, Save, Send, ShieldCheck, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
+import { ArrowUpRight, BarChart3, BookOpen, Check, ChevronDown, Clock3, Feather, Heart, LockKeyhole, MessageCircle, Pencil, Plus, Save, Send, ShieldCheck, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
 import {
   getGetDashboardSummaryQueryKey,
   getListConversationsQueryKey,
@@ -27,6 +27,7 @@ import type { ConversationMode, EmotionDetection, JournalEntry } from '@workspac
 import { AppShell, Button, EmptyState, ErrorNotice, formatDate, LoadingBlocks, PageHeading, Toggle } from '@/components/unsaid-ui';
 import { ChatWindow, detectLocalEmotions, EmotionBadge } from '@/components/chat-window';
 import { supabase } from '@/lib/supabase';
+import { useAuth } from '@/components/auth-provider';
 
 const modes: { id: ConversationMode; label: string; hint: string }[] = [
   { id: 'listen', label: 'Listen', hint: 'No fixing. Just room.' },
@@ -770,128 +771,564 @@ export function InsightsPage() {
 export function MemoryPage() {
   const client = useQueryClient();
   const bootstrap = useGetCompanionBootstrap();
-  const query = useListMemories({ query: { queryKey: getListMemoriesQueryKey() } });
-  const rawMemories = query.data ?? bootstrap.data?.memories;
-  const memories = Array.isArray(rawMemories) ? rawMemories : [];
   const [enabled, setEnabled] = useState(bootstrap.data?.memoryEnabled ?? true);
-  useEffect(() => { if (bootstrap.data) setEnabled(bootstrap.data.memoryEnabled); }, [bootstrap.data]);
+  useEffect(() => {
+    if (bootstrap.data) setEnabled(bootstrap.data.memoryEnabled);
+  }, [bootstrap.data]);
   const update = useUpdateMemorySettings();
-  const remove = useDeleteMemory();
 
-  // AI-suggested memory items (unapproved by default)
-  const [suggestedFacts, setSuggestedFacts] = useState<{ id: number; fact: string; approved: boolean; createdAt: string }[]>([]);
+  const { session } = useAuth();
+  const currentUserId = session?.user?.id ?? null;
 
-  const fetchSuggestedFacts = async () => {
+  interface MemoryItem {
+    id: number;
+    fact: string;
+    approved: boolean;
+    userId: string | null;
+    createdAt: string;
+  }
+
+  const [items, setItems] = useState<MemoryItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Edit state for approved items
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Manual add state
+  const [isAdding, setIsAdding] = useState(false);
+  const [newFact, setNewFact] = useState('');
+  const [savingNewFact, setSavingNewFact] = useState(false);
+
+  const fetchMemoryItems = useCallback(async () => {
+    setLoading(true);
+    setError(null);
     try {
-      const { data } = await supabase
+      let data: any[] | null = null;
+      let query = supabase
         .from('memory_items')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (data && data.length > 0) {
-        setSuggestedFacts(data.map((d: any) => ({
-          id: d.id,
-          fact: d.fact,
-          approved: Boolean(d.approved),
-          createdAt: d.created_at || new Date().toISOString(),
-        })));
-      } else {
-        // Realistic unapproved starter suggestions noticed from chat
-        setSuggestedFacts([
-          { id: 901, fact: 'User is navigating a difficult breakup and processing grief', approved: false, createdAt: new Date().toISOString() },
-          { id: 902, fact: 'User prefers quiet presence before jumping to solutions', approved: false, createdAt: new Date(Date.now() - 3600000).toISOString() },
-        ]);
+      if (currentUserId) {
+        query = query.eq('user_id', currentUserId);
       }
-    } catch {
-      setSuggestedFacts([
-        { id: 901, fact: 'User is navigating a difficult breakup and processing grief', approved: false, createdAt: new Date().toISOString() },
-      ]);
+
+      const res = await query;
+      if (res.data) {
+        data = res.data;
+      } else if (res.error) {
+        console.warn('Supabase query failed, falling back to API server:', res.error);
+        const apiRes = await fetch(
+          `/api/companion/memory-items${currentUserId ? `?userId=${encodeURIComponent(currentUserId)}` : ''}`,
+        );
+        if (apiRes.ok) {
+          data = await apiRes.json();
+        }
+      }
+
+      if (data) {
+        setItems(
+          data.map((d: any) => ({
+            id: d.id,
+            fact: d.fact,
+            approved: Boolean(d.approved),
+            userId: d.user_id ?? d.userId ?? null,
+            createdAt: d.created_at ?? d.createdAt ?? new Date().toISOString(),
+          })),
+        );
+      } else {
+        setItems([]);
+      }
+    } catch (err) {
+      console.error('Error fetching memory items:', err);
+      try {
+        const apiRes = await fetch(
+          `/api/companion/memory-items${currentUserId ? `?userId=${encodeURIComponent(currentUserId)}` : ''}`,
+        );
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          setItems(
+            apiData.map((d: any) => ({
+              id: d.id,
+              fact: d.fact,
+              approved: Boolean(d.approved),
+              userId: d.user_id ?? d.userId ?? null,
+              createdAt: d.created_at ?? d.createdAt ?? new Date().toISOString(),
+            })),
+          );
+        } else {
+          setItems([]);
+        }
+      } catch {
+        setItems([]);
+        setError('Could not load memory items. Please try refreshing.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUserId]);
+
+  useEffect(() => {
+    fetchMemoryItems();
+  }, [fetchMemoryItems]);
+
+  // Unapproved item action: Approve
+  const handleApprove = async (id: number) => {
+    // Optimistic update
+    setItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, approved: true } : item)),
+    );
+    try {
+      const { error: sbError } = await supabase
+        .from('memory_items')
+        .update({ approved: true })
+        .eq('id', id);
+      if (sbError) {
+        await fetch(`/api/companion/memory-items/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ approved: true }),
+        });
+      }
+    } catch (err) {
+      console.error('Failed to approve memory item:', err);
+      fetchMemoryItems();
     }
   };
 
-  useEffect(() => {
-    fetchSuggestedFacts();
-  }, []);
-
-  const approveFact = async (id: number, factText: string) => {
+  // Unapproved item action: Reject
+  const handleReject = async (id: number) => {
+    // Optimistic delete
+    setItems((prev) => prev.filter((item) => item.id !== id));
     try {
-      await supabase.from('memory_items').update({ approved: true }).eq('id', id);
-    } catch {}
-    setSuggestedFacts((prev) => prev.map((f) => f.id === id ? { ...f, approved: true } : f));
+      const { error: sbError } = await supabase
+        .from('memory_items')
+        .delete()
+        .eq('id', id);
+      if (sbError) {
+        await fetch(`/api/companion/memory-items/${id}`, {
+          method: 'DELETE',
+        });
+      }
+    } catch (err) {
+      console.error('Failed to reject memory item:', err);
+      fetchMemoryItems();
+    }
   };
 
-  const dismissFact = async (id: number) => {
-    try {
-      await supabase.from('memory_items').delete().eq('id', id);
-    } catch {}
-    setSuggestedFacts((prev) => prev.filter((f) => f.id !== id));
+  // Approved item action: Start editing
+  const handleStartEdit = (item: MemoryItem) => {
+    setEditingId(item.id);
+    setEditText(item.fact);
   };
 
-  const pendingFacts = suggestedFacts.filter((f) => !f.approved);
+  // Approved item action: Cancel editing
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditText('');
+  };
 
-  return <AppShell><PageHeading eyebrow="Your memory" title="You are in control." description="Unsaid can remember the details you choose to make conversations feel more continuous. Nothing is kept without your say." action={<div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3"><div><p className="text-xs font-bold">Memory {enabled ? 'on' : 'off'}</p><p className="text-[10px] text-muted-foreground">For your companion</p></div><Toggle enabled={enabled} label="memory" onChange={(value) => { setEnabled(value); update.mutate({ data: { enabled: value } }, { onSuccess: () => client.invalidateQueries({ queryKey: getListMemoriesQueryKey() }), onError: () => setEnabled(!value) }); }} /></div>} />
-    <div className="mb-6 flex items-start gap-4 rounded-[22px] border border-accent/25 bg-accent/10 p-5"><span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/20 text-foreground"><LockKeyhole size={18} /></span><div><p className="text-sm font-bold">Memory is a choice, not a default.</p><p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">After chat conversations, Unsaid suggests potential facts it noticed, but saves them as UNAPPROVED. Nothing is retained in active memory until you explicitly approve it.</p></div></div>
+  // Approved item action: Save edit
+  const handleSaveEdit = async (id: number) => {
+    const trimmed = editText.trim();
+    if (!trimmed) return;
+    setSavingEdit(true);
+    // Optimistic update
+    setItems((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, fact: trimmed } : item)),
+    );
+    setEditingId(null);
+    try {
+      const { error: sbError } = await supabase
+        .from('memory_items')
+        .update({ fact: trimmed })
+        .eq('id', id);
+      if (sbError) {
+        await fetch(`/api/companion/memory-items/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fact: trimmed }),
+        });
+      }
+    } catch (err) {
+      console.error('Failed to save memory item:', err);
+      fetchMemoryItems();
+    } finally {
+      setSavingEdit(false);
+    }
+  };
 
-    {/* AI Unapproved Memory Items Review Section */}
-    {pendingFacts.length > 0 && (
-      <section className="mb-8 rounded-[25px] border border-border bg-secondary/35 p-6" data-testid="section-unapproved-memories">
-        <div className="mb-4 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sparkles size={16} className="text-primary" />
-            <h2 className="text-sm font-bold">Noticed in recent conversation (Unapproved)</h2>
+  // Approved item action: Delete
+  const handleDelete = async (id: number) => {
+    // Optimistic delete
+    setItems((prev) => prev.filter((item) => item.id !== id));
+    try {
+      const { error: sbError } = await supabase
+        .from('memory_items')
+        .delete()
+        .eq('id', id);
+      if (sbError) {
+        await fetch(`/api/companion/memory-items/${id}`, {
+          method: 'DELETE',
+        });
+      }
+    } catch (err) {
+      console.error('Failed to delete memory item:', err);
+      fetchMemoryItems();
+    }
+  };
+
+  // Manual add memory
+  const handleAddFact = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newFact.trim();
+    if (!trimmed) return;
+    setSavingNewFact(true);
+    try {
+      const { data, error: sbError } = await supabase
+        .from('memory_items')
+        .insert({
+          fact: trimmed,
+          approved: true,
+          user_id: currentUserId,
+        })
+        .select()
+        .single();
+
+      if (data) {
+        setItems((prev) => [
+          {
+            id: data.id,
+            fact: data.fact,
+            approved: Boolean(data.approved),
+            userId: data.user_id,
+            createdAt: data.created_at,
+          },
+          ...prev,
+        ]);
+      } else {
+        const apiRes = await fetch('/api/companion/memory-items', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fact: trimmed,
+            approved: true,
+            userId: currentUserId,
+          }),
+        });
+        if (apiRes.ok) {
+          const item = await apiRes.json();
+          setItems((prev) => [
+            {
+              id: item.id,
+              fact: item.fact,
+              approved: Boolean(item.approved),
+              userId: item.userId,
+              createdAt: item.createdAt,
+            },
+            ...prev,
+          ]);
+        }
+      }
+      setNewFact('');
+      setIsAdding(false);
+    } catch (err) {
+      console.error('Failed to add memory item:', err);
+    } finally {
+      setSavingNewFact(false);
+    }
+  };
+
+  const unapprovedItems = items.filter((i) => !i.approved);
+  const approvedItems = items.filter((i) => i.approved);
+
+  return (
+    <AppShell>
+      <PageHeading
+        eyebrow="Your memory"
+        title="You are in control."
+        description="Unsaid can remember the details you choose to make conversations feel more continuous. Nothing is kept without your say."
+        action={
+          <div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3">
+            <div>
+              <p className="text-xs font-bold">Memory {enabled ? 'on' : 'off'}</p>
+              <p className="text-[10px] text-muted-foreground">For your companion</p>
+            </div>
+            <Toggle
+              enabled={enabled}
+              label="memory"
+              onChange={(value) => {
+                setEnabled(value);
+                update.mutate(
+                  { data: { enabled: value } },
+                  {
+                    onSuccess: () =>
+                      client.invalidateQueries({ queryKey: getListMemoriesQueryKey() }),
+                    onError: () => setEnabled(!value),
+                  },
+                );
+              }}
+            />
           </div>
-          <span className="rounded-full bg-secondary px-2.5 py-0.5 font-mono-ui text-[9px] uppercase tracking-wider text-primary">
-            {pendingFacts.length} pending review
-          </span>
+        }
+      />
+
+      {/* Prominent Explanation Banner */}
+      <div
+        className="mb-8 flex items-start gap-4 rounded-[22px] border border-accent/25 bg-accent/10 p-5 shadow-sm"
+        data-testid="banner-memory-explanation"
+      >
+        <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent/20 text-foreground">
+          <ShieldCheck size={18} />
+        </span>
+        <div>
+          <p className="text-sm font-bold text-foreground">
+            The AI will only remember approved facts in future conversations.
+          </p>
+          <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
+            After chat conversations, Unsaid notices key details and suggests them for your review. Unapproved items remain dormant until you approve them. You have complete control to edit or delete any approved memory at any time.
+          </p>
         </div>
-        <p className="mb-4 text-xs text-muted-foreground">
-          Unsaid noticed these details. Would you like Unsaid to carry them forward?
-        </p>
-        <div className="space-y-3">
-          {pendingFacts.map((item) => (
-            <div
-              key={item.id}
-              className="flex flex-col gap-3 rounded-2xl border border-border/80 bg-card p-4 transition-all sm:flex-row sm:items-center sm:justify-between"
-              data-testid={`unapproved-item-${item.id}`}
-            >
-              <div className="flex items-center gap-3">
-                <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent/20 text-foreground">
-                  <Feather size={14} />
-                </span>
-                <div>
-                  <p className="text-sm font-medium text-foreground">{item.fact}</p>
-                  <p className="mt-0.5 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">
-                    Suggested {formatDate(item.createdAt, true)} · Unapproved
-                  </p>
-                </div>
+      </div>
+
+      {error && <ErrorNotice message={error} />}
+
+      {loading ? (
+        <LoadingBlocks count={3} />
+      ) : (
+        <div className="space-y-8">
+          {/* Unapproved Facts Section */}
+          <section className="rounded-[25px] border border-border bg-secondary/35 p-6" data-testid="section-unapproved-memories">
+            <div className="mb-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} className="text-primary" />
+                <h2 className="text-sm font-bold">Pending Review (Unapproved)</h2>
               </div>
-              <div className="flex items-center gap-2 self-end sm:self-center">
+              <span className="rounded-full bg-secondary px-2.5 py-0.5 font-mono-ui text-[9px] uppercase tracking-wider text-primary">
+                {unapprovedItems.length} pending review
+              </span>
+            </div>
+            <p className="mb-4 text-xs text-muted-foreground">
+              Unsaid noticed these details during recent conversations. Choose whether to carry them forward.
+            </p>
+
+            {unapprovedItems.length === 0 ? (
+              <div className="rounded-2xl border border-dashed border-border/80 bg-card/50 p-6 text-center" data-testid="empty-unapproved-memories">
+                <p className="text-xs text-muted-foreground">
+                  No unapproved facts pending review. When Unsaid notices new details in your conversations, they will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {unapprovedItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex flex-col gap-3 rounded-2xl border border-border/80 bg-card p-4 transition-all sm:flex-row sm:items-center sm:justify-between"
+                    data-testid={`unapproved-item-${item.id}`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-accent/20 text-foreground">
+                        <Feather size={14} />
+                      </span>
+                      <div>
+                        <p className="text-sm font-medium text-foreground">{item.fact}</p>
+                        <p className="mt-0.5 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">
+                          Suggested {formatDate(item.createdAt, true)} · Unapproved
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => handleReject(item.id)}
+                        className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                        data-testid={`button-reject-memory-${item.id}`}
+                      >
+                        <X size={13} />
+                        Reject
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApprove(item.id)}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-90 transition-opacity"
+                        data-testid={`button-approve-memory-${item.id}`}
+                      >
+                        <Check size={13} />
+                        Approve
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Approved Facts Section */}
+          <section className="rounded-[25px] border border-border bg-card p-6" data-testid="section-approved-memories">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <LockKeyhole size={16} className="text-primary" />
+                  <h2 className="text-sm font-bold">Approved Memories (Active in Conversations)</h2>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  These verified facts shape your companion’s understanding and memory continuity.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-muted px-2.5 py-0.5 font-mono-ui text-[9px] uppercase tracking-wider text-primary">
+                  {approvedItems.length} active {approvedItems.length === 1 ? 'fact' : 'facts'}
+                </span>
                 <button
                   type="button"
-                  onClick={() => dismissFact(item.id)}
-                  className="rounded-xl px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                  data-testid={`button-dismiss-fact-${item.id}`}
+                  onClick={() => setIsAdding(!isAdding)}
+                  className="inline-flex items-center gap-1 rounded-xl border border-border bg-secondary/50 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-secondary transition-colors"
+                  data-testid="button-toggle-add-memory"
                 >
-                  Dismiss
-                </button>
-                <button
-                  type="button"
-                  onClick={() => approveFact(item.id, item.fact)}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground shadow-sm hover:opacity-90 transition-opacity"
-                  data-testid={`button-approve-fact-${item.id}`}
-                >
-                  <Check size={13} />
-                  Approve
+                  <Plus size={13} />
+                  <span>Add fact</span>
                 </button>
               </div>
             </div>
-          ))}
-        </div>
-      </section>
-    )}
 
-    {query.isLoading && !memories.length ? <LoadingBlocks count={3} /> : memories.length === 0 ? <EmptyState icon={LockKeyhole} title="Nothing remembered yet" description="When something feels worth carrying forward, we will ask first." /> : <div className="space-y-3">{memories.map((memory) => <div key={memory.id} className={`flex flex-col gap-4 rounded-[22px] border border-border bg-card p-5 transition-opacity sm:flex-row sm:items-center ${memory.enabled ? '' : 'opacity-60'}`} data-testid={`row-memory-${memory.id}`}><div className="grid size-10 shrink-0 place-items-center rounded-xl bg-secondary text-primary"><Sparkles size={16} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h2 className="text-sm font-bold">{memory.label}</h2>{memory.enabled && <span className="rounded-full bg-muted px-2 py-0.5 font-mono-ui text-[8px] uppercase tracking-wider text-primary">In use</span>}</div><p className="mt-1 text-sm leading-5 text-muted-foreground">{memory.detail}</p><p className="mt-2 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground/70">Added {formatDate(memory.createdAt, true)}</p></div><div className="flex items-center gap-2 self-end sm:self-center"><span className="text-[10px] text-muted-foreground">{memory.enabled ? 'Remembering' : 'Paused'}</span><button onClick={() => remove.mutate({ memoryId: memory.id }, { onSuccess: () => client.invalidateQueries({ queryKey: getListMemoriesQueryKey() }) })} className="rounded-xl p-2.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Forget ${memory.label}`} data-testid={`button-forget-memory-${memory.id}`}><Trash2 size={15} /></button></div></div>)}</div>}
-  </AppShell>;
+            {/* Manual Add Form */}
+            {isAdding && (
+              <form onSubmit={handleAddFact} className="mb-5 rounded-2xl border border-border/80 bg-secondary/20 p-4" data-testid="form-add-memory">
+                <label htmlFor="input-new-fact" className="block text-xs font-medium text-foreground mb-1.5">
+                  What would you like Unsaid to remember?
+                </label>
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                  <input
+                    id="input-new-fact"
+                    type="text"
+                    value={newFact}
+                    onChange={(e) => setNewFact(e.target.value)}
+                    placeholder="e.g. Prefers quiet presence before jumping into advice"
+                    className="flex-1 rounded-xl border border-border bg-card px-3.5 py-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    data-testid="input-new-memory-fact"
+                    autoFocus
+                  />
+                  <div className="flex items-center gap-2 self-end sm:self-center">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsAdding(false);
+                        setNewFact('');
+                      }}
+                      className="rounded-xl px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={savingNewFact || !newFact.trim()}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50 transition-opacity"
+                      data-testid="button-save-new-memory"
+                    >
+                      <Check size={13} />
+                      Save memory
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
+
+            {approvedItems.length === 0 ? (
+              <EmptyState
+                icon={LockKeyhole}
+                title="No approved memories yet"
+                description="The AI will only remember approved facts in future conversations. Approve suggestions above or add one directly to give your companion continuity."
+              />
+            ) : (
+              <div className="space-y-3">
+                {approvedItems.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl border border-border bg-card p-4 transition-all hover:border-border/90"
+                    data-testid={`approved-item-${item.id}`}
+                  >
+                    {editingId === item.id ? (
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex-1">
+                          <input
+                            type="text"
+                            value={editText}
+                            onChange={(e) => setEditText(e.target.value)}
+                            className="w-full rounded-xl border border-primary/50 bg-secondary/30 px-3.5 py-2 text-xs font-medium text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                            data-testid={`input-edit-fact-${item.id}`}
+                            autoFocus
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 self-end sm:self-center">
+                          <button
+                            type="button"
+                            onClick={handleCancelEdit}
+                            className="rounded-xl px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted transition-colors"
+                            data-testid={`button-cancel-fact-${item.id}`}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleSaveEdit(item.id)}
+                            disabled={savingEdit || !editText.trim()}
+                            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-3.5 py-1.5 text-xs font-bold text-primary-foreground disabled:opacity-50 transition-opacity"
+                            data-testid={`button-save-fact-${item.id}`}
+                          >
+                            <Check size={13} />
+                            Save
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-secondary text-primary">
+                            <Sparkles size={14} />
+                          </span>
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{item.fact}</p>
+                            <p className="mt-0.5 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">
+                              Approved {formatDate(item.createdAt, true)} · Active
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 self-end sm:self-center">
+                          <button
+                            type="button"
+                            onClick={() => handleStartEdit(item)}
+                            className="inline-flex items-center gap-1 rounded-xl p-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                            aria-label={`Edit ${item.fact}`}
+                            data-testid={`button-edit-memory-${item.id}`}
+                          >
+                            <Pencil size={14} />
+                            <span className="text-xs">Edit</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(item.id)}
+                            className="inline-flex items-center gap-1 rounded-xl p-2 text-xs font-semibold text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors"
+                            aria-label={`Delete ${item.fact}`}
+                            data-testid={`button-delete-memory-${item.id}`}
+                          >
+                            <Trash2 size={14} />
+                            <span className="text-xs">Delete</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+    </AppShell>
+  );
 }
 
 export function SettingsPage() {
