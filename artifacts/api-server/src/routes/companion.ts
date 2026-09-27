@@ -104,21 +104,47 @@ export const SYSTEM_PROMPTS: Record<Mode, string> = {
   private: "Reflect gently without storing long-term memory.",
 };
 
-function replyFor(mode: Mode, text: string) {
+function replyFor(mode: Mode, text: string, memoryFacts?: string[]) {
   const emotion = emotionFor(text);
+  let base = "";
   if (mode === "listen") {
-    return `I hear how much weight is sitting underneath this ${emotion} feeling. It makes total sense that you feel this way, and you don't have to fix or make it neat right now.`;
+    base = `I hear how much weight is sitting underneath this ${emotion} feeling. It makes total sense that you feel this way, and you don't have to fix or make it neat right now.`;
+  } else if (mode === "understand") {
+    base = `It sounds like ${emotion} might be sharing space with something else you haven't fully named yet. If you look closely at what's happening, what single part feels hardest to speak out loud right now?`;
+  } else if (mode === "reframe") {
+    base = `Carrying regret around this can feel heavy. Looking at this with compassion: what was actually within your control, how would you advise a dear friend in your exact shoes, and what is one thing you handled right?`;
+  } else if (mode === "help") {
+    base = `Here are 2 concrete, realistic small next steps we can take together:\n1. Take a 5-minute pause without forcing yourself to solve the whole picture.\n2. Identify the single smallest action within your reach today. Would you like to talk through that step first?`;
+  } else {
+    base = `This can stay unshared here. You can leave it unfinished if that is the most honest place to leave it.`;
   }
-  if (mode === "understand") {
-    return `It sounds like ${emotion} might be sharing space with something else you haven't fully named yet. If you look closely at what's happening, what single part feels hardest to speak out loud right now?`;
+
+  if (memoryFacts && memoryFacts.length > 0) {
+    const factText = memoryFacts[0]
+      .replace(/^user\s+is\s+/i, "you are ")
+      .replace(/^user\s+has\s+/i, "you have ")
+      .replace(/^user\s+/i, "you ");
+    return `${base}\n\nI’m also gently keeping in mind that ${factText}. You don't have to carry that alone.`;
   }
-  if (mode === "reframe") {
-    return `Carrying regret around this can feel heavy. Looking at this with compassion: what was actually within your control, how would you advise a dear friend in your exact shoes, and what is one thing you handled right?`;
+
+  return base;
+}
+
+async function getApprovedMemoryFacts(userId?: string | null): Promise<string[]> {
+  try {
+    const items = await db
+      .select({ fact: memoryItemsTable.fact })
+      .from(memoryItemsTable)
+      .where(
+        userId
+          ? and(eq(memoryItemsTable.approved, true), eq(memoryItemsTable.userId, userId))
+          : eq(memoryItemsTable.approved, true)
+      )
+      .limit(3);
+    return items.map((i) => i.fact);
+  } catch {
+    return [];
   }
-  if (mode === "help") {
-    return `Here are 2 concrete, realistic small next steps we can take together:\n1. Take a 5-minute pause without forcing yourself to solve the whole picture.\n2. Identify the single smallest action within your reach today. Would you like to talk through that step first?`;
-  }
-  return `This can stay unshared here. You can leave it unfinished if that is the most honest place to leave it.`;
 }
 
 let schemaInitialized = false;
@@ -898,7 +924,7 @@ router.get("/companion/memory-items", async (req, res, next) => {
   }
 });
 
-router.patch("/companion/memory-items/:id/approve", async (req, res, next) => {
+router.patch(["/companion/memory-items/:id", "/companion/memory-items/:id/approve", "/companion/memory-items/:id/approval"], async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { approved = true } = req.body ?? {};

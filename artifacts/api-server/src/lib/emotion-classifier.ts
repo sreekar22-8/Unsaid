@@ -18,11 +18,13 @@ export async function classifyEmotions(content: string): Promise<ClassifiedEmoti
   // 1. Try Gemini API if key is present
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3500);
+    const models = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
+    for (const model of models) {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
 
-      const prompt = `You are an expert psychological emotion analyst. Classify the following user message into 1 to 3 distinct emotions experienced by the author, along with an intensity score from 0.0 to 1.0 (where 0.1 is subtle and 1.0 is intense).
+        const prompt = `You are an expert psychological emotion analyst. Classify the following user message into 1 to 3 distinct emotions experienced by the author, along with an intensity score from 0.0 to 1.0 (where 0.1 is subtle and 1.0 is intense).
 Valid emotions include: anxiety, sadness, anger, frustrated, hopeful, relief, gratitude, shame, guilt, lonely, confused, reflective, uncertain, grief, overwhelmed, peaceful, joy.
 
 Return ONLY a valid JSON array of 1 to 3 objects, with NO surrounding text, markdown backticks, or explanation.
@@ -32,20 +34,23 @@ Format example:
 Message:
 "${trimmed.slice(0, 1500)}"`;
 
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        signal: controller.signal,
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 200,
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiKey,
           },
-        }),
-      });
-      clearTimeout(timeout);
+          signal: controller.signal,
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 200,
+            },
+          }),
+        });
+        clearTimeout(timeout);
 
       if (response.ok) {
         const data: any = await response.json();
@@ -63,6 +68,7 @@ Message:
       // Fall through to Anthropic or heuristic
     }
   }
+}
 
   // 2. Try Anthropic API if key is present
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
