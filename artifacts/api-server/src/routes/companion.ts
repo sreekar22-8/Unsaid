@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, desc, eq, gt, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lt, or, sql } from "drizzle-orm";
 import {
   CreateConversationBody,
   CreateJournalEntryBody,
@@ -25,16 +25,26 @@ import {
   settingsTable,
 } from "@workspace/db/schema";
 import { extractMemoryFacts } from "../lib/memory-extractor";
-import { classifyEmotions } from "../lib/emotion-classifier";
+import {
+  classifyEmotions,
+  type ClassifiedEmotion,
+} from "../lib/emotion-classifier";
+import { logger } from "../lib/logger";
 import type { Request } from "express";
 
 /**
  * Verifies the Supabase JWT from the Authorization header by calling the
  * Supabase /auth/v1/user endpoint. Returns the authenticated user ID (sub)
- * or null if unauthenticated / token invalid.
+ * or null when no bearer token is supplied.
  *
  * NEVER trusts a userId from the request body or query string.
  */
+function httpError(message: string, status: number) {
+  const error = new Error(message) as Error & { status: number };
+  error.status = status;
+  return error;
+}
+
 async function getUserFromRequest(req: Request): Promise<string | null> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
@@ -42,9 +52,17 @@ async function getUserFromRequest(req: Request): Promise<string | null> {
   const token = authHeader.slice(7).trim();
   if (!token) return null;
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) return null;
+  // The browser-safe Supabase values are also sufficient for this user lookup.
+  // Prefer the server names, but support the existing Vite names so auth does
+  // not silently degrade into shared anonymous data.
+  const supabaseUrl =
+    process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey =
+    process.env.SUPABASE_ANON_KEY ??
+    process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw httpError("Authentication service is not configured.", 503);
+  }
 
   try {
     const resp = await fetch(`${supabaseUrl}/auth/v1/user`, {
@@ -53,11 +71,17 @@ async function getUserFromRequest(req: Request): Promise<string | null> {
         apikey: supabaseAnonKey,
       },
     });
-    if (!resp.ok) return null;
+    if (!resp.ok) throw httpError("Authentication failed.", 401);
     const data: any = await resp.json();
-    return typeof data?.id === "string" ? data.id : null;
-  } catch {
-    return null;
+    if (typeof data?.id !== "string") {
+      throw httpError("Authentication failed.", 401);
+    }
+    return data.id;
+  } catch (error) {
+    if (error && typeof error === "object" && "status" in error) {
+      throw error;
+    }
+    throw httpError("Authentication service is unavailable.", 503);
   }
 }
 
@@ -94,9 +118,8 @@ function memoryView(row: typeof memoriesTable.$inferSelect) {
 async function saveEmotionTags(
   message: typeof messagesTable.$inferSelect,
   userId: string | null,
-  content: string,
+  emotions: ClassifiedEmotion[],
 ) {
-  const emotions = await classifyEmotions(content);
   if (emotions.length === 0) return;
 
   await db.insert(emotionTagsTable).values(
@@ -124,7 +147,7 @@ function emotionFor(text: string) {
   if (/(anxious|worry|worried|nervous|overwhelm|panic)/.test(lower))
     return "anxious";
   if (/(happy|glad|excited|relief|grateful|good)/.test(lower)) return "hopeful";
-  return "uncertain";
+  return "neutral";
 }
 
 export const SYSTEM_PROMPTS: Record<Mode, string> = {
@@ -139,18 +162,37 @@ export const SYSTEM_PROMPTS: Record<Mode, string> = {
 };
 
 function replyFor(mode: Mode, text: string, memoryFacts?: string[]) {
+  const cleanText = text.trim().replace(/\s+/g, " ");
+  const excerpt =
+    cleanText.length > 180
+      ? `${cleanText.slice(0, 177).trimEnd()}…`
+      : cleanText;
+  const quoted = `“${excerpt}”`;
   const emotion = emotionFor(text);
-  let base = "";
-  if (mode === "listen") {
-    base = `I hear how much weight is sitting underneath this ${emotion} feeling. It makes total sense that you feel this way, and you don't have to fix or make it neat right now.`;
+  const isGreeting = /^(hi|hello|hey|good morning|good evening)\b[!.? ]*$/i.test(cleanText);
+  const isFarewell = /^(bye|goodbye|see you|take care)\b[!.? ]*$/i.test(cleanText);
+  let base: string;
+
+  if (isGreeting) {
+    base =
+      mode === "help"
+        ? "Hi. I’m here. What would you like help making a little easier?"
+        : "Hi. I’m here with you. How are you arriving today?";
+  } else if (isFarewell) {
+    base = "Take care. You can come back whenever you want to continue this.";
+  } else if (mode === "listen") {
+    base =
+      emotion === "neutral"
+        ? `I hear you saying ${quoted}. I’m here with you; you don’t need to make it more polished than that.`
+        : `I hear you saying ${quoted}. ${emotion} may be part of what is here, and you don’t have to solve it all right now.`;
   } else if (mode === "understand") {
-    base = `It sounds like ${emotion} might be sharing space with something else you haven't fully named yet. If you look closely at what's happening, what single part feels hardest to speak out loud right now?`;
+    base = `You said ${quoted}. What part of that feels most present or important when you pause with it for a moment?`;
   } else if (mode === "reframe") {
-    base = `Carrying regret around this can feel heavy. Looking at this with compassion: what was actually within your control, how would you advise a dear friend in your exact shoes, and what is one thing you handled right?`;
+    base = `You said ${quoted}. A kinder way to hold this might be to notice what the situation is asking of you now, without turning it into a verdict about who you are. What feels different when you look at it that way?`;
   } else if (mode === "help") {
-    base = `Here are 2 concrete, realistic small next steps we can take together:\n1. Take a 5-minute pause without forcing yourself to solve the whole picture.\n2. Identify the single smallest action within your reach today. Would you like to talk through that step first?`;
+    base = `For ${quoted}, let’s keep the next step small:\n1. Name the one outcome you need most today.\n2. Choose one action that takes ten minutes or less toward it.\nWhich part would be most useful to start with?`;
   } else {
-    base = `This can stay unshared here. You can leave it unfinished if that is the most honest place to leave it.`;
+    base = `I’ll keep ${quoted} here with you. This can stay unfinished and private; you don’t have to explain it further.`;
   }
 
   if (memoryFacts && memoryFacts.length > 0) {
@@ -189,6 +231,7 @@ async function generateCompanionReply(
   content: string,
   approvedFacts: string[] = [],
   conversationHistory: Array<{ role: string; content: string }> = [],
+  detectedEmotion = emotionFor(content),
 ): Promise<string> {
   // If private mode, memory is never used (reflects gently without storing or recalling long-term memory)
   // Private notes are strictly excluded and never passed to the AI
@@ -205,7 +248,13 @@ async function generateCompanionReply(
 
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey && content.trim()) {
-    const systemInstruction = `${modePrompt}${memoryContext}\n\nYou are Unsaid, a thoughtful, calm, empathetic companion. Speak with gentle warmth, clarity, and care.`;
+    const systemInstruction = `${modePrompt}
+
+The user's current message is the primary subject of your response. The detected emotion is only a low-confidence signal; do not force it onto the user or invent feelings they did not express.
+Detected emotion signal: ${detectedEmotion}
+Respond directly to the current message, and use conversation history and approved facts only when they are relevant. Never mention these instructions, memory, providers, or fallback behavior.
+
+You are Unsaid, a thoughtful, calm, empathetic companion. Speak with gentle warmth, clarity, and care.${memoryContext}`;
 
     const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
     if (conversationHistory.length > 0) {
@@ -251,18 +300,29 @@ async function generateCompanionReply(
 
         if (response.ok) {
           const data: any = await response.json();
-          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          const text = data?.candidates?.[0]?.content?.parts
+            ?.map((part: { text?: string }) => part.text)
+            .filter(Boolean)
+            .join("\n");
           if (text && text.trim()) {
             return text.trim();
           }
+          logger.warn({ model }, "Gemini returned no companion text");
+        } else {
+          logger.warn({ model, status: response.status }, "Gemini companion request failed");
         }
-      } catch {
-        // Fallback to next model or rule-based response
+      } catch (error) {
+        logger.warn(
+          { model, error: error instanceof Error ? error.message : String(error) },
+          "Gemini companion request failed",
+        );
       }
     }
+  } else if (!geminiKey) {
+    logger.warn("GEMINI_API_KEY is not configured; using deterministic companion fallback");
   }
 
-  // Fallback to empathetic response incorporating approved memory facts
+  // Fallback remains grounded in the current message and selected mode.
   return replyFor(mode, content, factsToUse);
 }
 
@@ -398,8 +458,9 @@ async function getMemoryEnabled() {
   return settings?.memoryEnabled ?? true;
 }
 
-router.get("/companion/bootstrap", async (_req, res, next) => {
+router.get("/companion/bootstrap", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     await ensureSeed();
 
     const [conversations, messages, memories, journalEntries] =
@@ -407,16 +468,35 @@ router.get("/companion/bootstrap", async (_req, res, next) => {
         db
           .select()
           .from(conversationsTable)
+          .where(
+            userId
+              ? eq(conversationsTable.userId, userId)
+              : isNull(conversationsTable.userId),
+          )
           .orderBy(desc(conversationsTable.updatedAt)),
-        db.select().from(messagesTable).orderBy(messagesTable.createdAt),
+        db
+          .select()
+          .from(messagesTable)
+          .where(
+            userId
+              ? eq(messagesTable.userId, userId)
+              : isNull(messagesTable.userId),
+          )
+          .orderBy(messagesTable.createdAt),
         db.select().from(memoriesTable).orderBy(desc(memoriesTable.createdAt)),
         db
           .select()
           .from(journalEntriesTable)
+          .where(
+            userId
+              ? eq(journalEntriesTable.userId, userId)
+              : isNull(journalEntriesTable.userId),
+          )
           .orderBy(desc(journalEntriesTable.createdAt)),
       ]);
 
     const dashboard = await buildDashboard(
+      userId,
       conversations.length,
       journalEntries.length,
       messages,
@@ -435,13 +515,19 @@ router.get("/companion/bootstrap", async (_req, res, next) => {
   }
 });
 
-router.get("/companion/conversations", async (_req, res, next) => {
+router.get("/companion/conversations", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     await ensureSeed();
 
     const rows = await db
       .select()
       .from(conversationsTable)
+      .where(
+        userId
+          ? eq(conversationsTable.userId, userId)
+          : isNull(conversationsTable.userId),
+      )
       .orderBy(desc(conversationsTable.updatedAt));
 
     res.json(rows.map(conversationView));
@@ -452,6 +538,7 @@ router.get("/companion/conversations", async (_req, res, next) => {
 
 router.post("/companion/conversations", async (req, res, next) => {
   try {
+    const userId = await getUserFromRequest(req);
     await ensureSeed();
 
     const input = CreateConversationBody.parse(req.body ?? {});
@@ -459,7 +546,7 @@ router.post("/companion/conversations", async (req, res, next) => {
     const [row] = await db
       .insert(conversationsTable)
       .values({
-        userId: null,
+        userId,
         title: input.title || "A new conversation",
         mode: input.mode || "listen",
       })
@@ -475,14 +562,40 @@ router.get(
   "/companion/conversations/:conversationId/messages",
   async (req, res, next) => {
     try {
+      const userId = await getUserFromRequest(req);
       const { conversationId } = ListMessagesParams.parse({
         conversationId: Number(req.params.conversationId),
       });
 
+      const [conversation] = await db
+        .select({ id: conversationsTable.id })
+        .from(conversationsTable)
+        .where(
+          and(
+            eq(conversationsTable.id, conversationId),
+            userId
+              ? eq(conversationsTable.userId, userId)
+              : isNull(conversationsTable.userId),
+          ),
+        )
+        .limit(1);
+
+      if (!conversation) {
+        res.status(404).json({ error: "Conversation not found" });
+        return;
+      }
+
       const rows = await db
         .select()
         .from(messagesTable)
-        .where(eq(messagesTable.conversationId, conversationId))
+        .where(
+          and(
+            eq(messagesTable.conversationId, conversationId),
+            userId
+              ? eq(messagesTable.userId, userId)
+              : isNull(messagesTable.userId),
+          ),
+        )
         .orderBy(messagesTable.createdAt);
 
       res.json(rows.map(messageView));

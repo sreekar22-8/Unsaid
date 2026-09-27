@@ -4,121 +4,87 @@
  * Returns a JSON array of { emotion: string, intensity: number }.
  */
 
+import { logger } from "../lib/logger";
+
 export type ClassifiedEmotion = {
   emotion: string;
   intensity: number; // 0 to 1
 };
 
+const GEMINI_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-flash-latest",
+];
+
 export async function classifyEmotions(content: string): Promise<ClassifiedEmotion[]> {
-  const trimmed = (content || '').trim();
+  const trimmed = (content || "").trim();
   if (!trimmed) {
-    return [{ emotion: 'neutral', intensity: 0.5 }];
+    return [{ emotion: "neutral", intensity: 0.2 }];
   }
 
-  // 1. Try Gemini API if key is present
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    const models = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'];
-    for (const model of models) {
+    for (const model of GEMINI_MODELS) {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
+        const prompt = `You are an expert psychological emotion analyst. Classify the following user message into 1 to 3 distinct emotions experienced by the author, with an intensity score from 0.0 to 1.0.
+Valid emotions include: anxiety, sadness, anger, frustrated, hopeful, relief, gratitude, shame, guilt, lonely, confused, reflective, uncertain, grief, overwhelmed, peaceful, joy, neutral.
 
-        const prompt = `You are an expert psychological emotion analyst. Classify the following user message into 1 to 3 distinct emotions experienced by the author, along with an intensity score from 0.0 to 1.0 (where 0.1 is subtle and 1.0 is intense).
-Valid emotions include: anxiety, sadness, anger, frustrated, hopeful, relief, gratitude, shame, guilt, lonely, confused, reflective, uncertain, grief, overwhelmed, peaceful, joy.
-
-Return ONLY a valid JSON array of 1 to 3 objects, with NO surrounding text, markdown backticks, or explanation.
+Return ONLY a valid JSON array of 1 to 3 objects, with no explanation or markdown.
 Format example:
-[{"emotion": "anxiety", "intensity": 0.82}, {"emotion": "frustrated", "intensity": 0.65}]
+[{"emotion":"anxiety","intensity":0.82}]
 
 Message:
 "${trimmed.slice(0, 1500)}"`;
-
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': geminiKey,
-          },
-          signal: controller.signal,
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.2,
-              maxOutputTokens: 200,
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-goog-api-key": geminiKey,
             },
-          }),
-        });
+            signal: controller.signal,
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: { temperature: 0.2, maxOutputTokens: 200 },
+            }),
+          },
+        );
         clearTimeout(timeout);
 
-      if (response.ok) {
+        if (!response.ok) {
+          logger.warn({ model, status: response.status }, "Gemini emotion classification failed");
+          continue;
+        }
+
         const data: any = await response.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const text =
+          data?.candidates?.[0]?.content?.parts
+            ?.map((part: { text?: string }) => part.text)
+            .filter(Boolean)
+            .join("\n") || "";
         const match = text.match(/\[[\s\S]*\]/);
         if (match) {
           const parsed = JSON.parse(match[0]);
-          if (Array.isArray(parsed) && parsed.length > 0) {
+          if (Array.isArray(parsed)) {
             const valid = validateEmotionArray(parsed);
             if (valid.length > 0) return valid;
           }
         }
+        logger.warn({ model }, "Gemini returned no valid emotion classification");
+      } catch (error) {
+        logger.warn(
+          { model, error: error instanceof Error ? error.message : String(error) },
+          "Gemini emotion classification request failed",
+        );
       }
-    } catch {
-      // Fall through to Anthropic or heuristic
-    }
-  }
-}
-
-  // 2. Try Anthropic API if key is present
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
-  if (anthropicKey) {
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3500);
-
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: 'claude-3-haiku-20240307',
-          max_tokens: 200,
-          temperature: 0.2,
-          messages: [
-            {
-              role: 'user',
-              content: `Classify the following text into 1 to 3 primary emotions with an intensity score from 0.0 to 1.0.
-Return ONLY a valid JSON array like: [{"emotion": "sadness", "intensity": 0.75}]
-Text: "${trimmed.slice(0, 1500)}"`,
-            },
-          ],
-        }),
-      });
-      clearTimeout(timeout);
-
-      if (response.ok) {
-        const data: any = await response.json();
-        const text = data?.content?.[0]?.text || '';
-        const match = text.match(/\[[\s\S]*\]/);
-        if (match) {
-          const parsed = JSON.parse(match[0]);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const valid = validateEmotionArray(parsed);
-            if (valid.length > 0) return valid;
-          }
-        }
-      }
-    } catch {
-      // Fall through to heuristic classifier
     }
   }
 
-  // 3. Fallback Heuristic Emotion Classifier
   return heuristicClassifyEmotions(trimmed);
 }
 
@@ -167,8 +133,17 @@ export function heuristicClassifyEmotions(text: string): ClassifiedEmotion[] {
   }
 
   if (tags.length === 0) {
-    const lengthBoost = Math.min(0.3, lower.length / 500);
-    tags.push({ emotion: 'reflective', intensity: parseFloat((0.5 + lengthBoost).toFixed(2)) });
+    const isGreetingOrFarewell =
+      /^(hi|hello|hey|good morning|good evening|bye|goodbye|see you)\b[!.? ]*$/i.test(
+        text.trim(),
+      );
+    const lengthBoost = Math.min(0.12, lower.length / 1000);
+    tags.push({
+      emotion: isGreetingOrFarewell ? "neutral" : "reflective",
+      intensity: parseFloat(
+        (isGreetingOrFarewell ? 0.2 : 0.35 + lengthBoost).toFixed(2),
+      ),
+    });
   }
 
   return tags;

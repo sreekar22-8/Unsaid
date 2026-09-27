@@ -1,0 +1,314 @@
+Perform a complete bug-fix and reliability pass on the existing Unsaid project. Do NOT redesign the app or create a new architecture. Work with the existing code and fix the actual root causes.
+
+IMPORTANT: Do not commit or push anything to GitHub. Do not make unrelated changes.
+
+## 1. MAIN PRIORITY — AI CHAT RESPONSES
+
+The biggest current problem is that emotion detection works, but AI responses are sometimes generic, repeated, or unrelated to the user's actual message.
+
+Examples from current testing:
+
+* "hello how are you" → uncertain 0.3 → generic emotional-weight response
+* "i am sad" → sadness 0.8 → generic sadness response
+* "i had a good day today" → hopeful 0.8 → generic emotional response
+* "hello" / "bye" → sometimes produce an unrelated regret-style response
+* "help me" → Help mode gives an appropriate help-style response
+* "i am good now" → hopeful 0.8 but sometimes receives the same Help-style response
+
+Trace the COMPLETE flow:
+
+frontend input
+→ conversation creation/loading
+→ chat API
+→ emotion classification
+→ mode selection
+→ conversation history
+→ approved memory retrieval
+→ generateCompanionReply
+→ Gemini/API request
+→ response parsing
+→ fallback handling
+→ database persistence
+→ frontend rendering.
+
+Determine the exact root cause.
+
+Check specifically:
+
+* Is Gemini actually being called?
+* Is the latest user message included in the Gemini request?
+* Is the selected mode included?
+* Is the detected emotion included correctly?
+* Is conversation history correct and in the correct role order?
+* Is an old conversation/message being reused accidentally?
+* Is the Gemini response being parsed correctly?
+* Is an exception silently causing replyFor() to run?
+* Are catch blocks hiding API errors?
+* Is replyFor() being called when Gemini succeeds?
+* Is the frontend displaying a previous response?
+* Is state being updated incorrectly after sending a message?
+* Is there any stale/cached response?
+* Is the same fallback/template being selected because of incorrect mode/emotion data?
+
+Fix the root cause, not just the visible symptom.
+
+The final AI response must be based primarily on the user's CURRENT message while naturally considering conversation history and approved memories.
+
+Do not simply create many hard-coded replies for individual test messages.
+
+## 2. ALL FOUR MODES
+
+Verify and fix all existing modes:
+
+### Listen
+
+Should primarily listen, acknowledge, and reflect what the user actually said.
+It should not unnecessarily give advice.
+
+### Understand
+
+Should help identify/explore the feeling underneath the user's message.
+The response should still be directly relevant to the actual message.
+
+### Reframe
+
+Should offer a compassionate alternative perspective based on what the user actually said.
+Do not randomly introduce emotions such as regret when the user did not mention them.
+
+### Help
+
+Should provide practical, relevant next steps when the user is asking for help.
+Do not automatically return the same generic steps for unrelated messages.
+
+### Private
+
+Preserve its private behavior and isolation.
+Do not accidentally expose or use private notes as AI memory/context.
+
+Do not remove any of these modes or change their UI.
+
+## 3. EMOTION DETECTION
+
+Emotion detection currently appears to work, so preserve it.
+
+Verify that:
+
+* emotion label is correctly extracted
+* intensity is correctly extracted
+* emotion shown in the UI matches the API result
+* emotion is correctly passed into response generation
+* an uncertain/low-confidence emotion does not force an unrelated emotional response
+* normal messages such as "hello", "hi", and "bye" are handled naturally
+
+Do not force every message into an intense emotional interpretation.
+
+## 4. CONVERSATION HISTORY
+
+Verify that each message belongs to the correct conversation.
+
+Check for:
+
+* stale conversation IDs
+* wrong conversation IDs
+* duplicated messages
+* previous assistant responses being reused
+* incorrect role names
+* history ordering problems
+* sending an old message instead of the current message
+* frontend state showing stale data
+
+The latest user message must always be available to the response generator.
+
+## 5. MEMORY
+
+Preserve the existing memory design.
+
+Important rule:
+
+ONLY approved memory_items may be supplied as AI memory/context.
+
+Unapproved memories must NOT influence future conversations.
+
+Private notes must remain separate and must NOT be supplied as normal conversation memory.
+
+Do not redesign the memory system unless a bug directly prevents this behavior.
+
+## 6. DASHBOARD / EMOTION DATA
+
+Check the dashboard for obvious data consistency bugs.
+
+Verify that:
+
+* emotion tags come from actual stored emotion results
+* intensity values are displayed correctly
+* counts are calculated correctly
+* recent entries have correct dates
+* current conversations do not incorrectly overwrite historical data
+* demo/seed data is clearly separated from real user data if such separation already exists
+
+Do not redesign the dashboard.
+
+If the existing historical/demo data is intentional, leave it alone rather than deleting it.
+
+## 7. JOURNAL
+
+Verify that journal creation, viewing, and emotion/reflection data continue working.
+
+Do not change the journal design.
+
+Make sure journal data is associated with the correct authenticated user.
+
+## 8. AUTHENTICATION AND USER DATA
+
+Check that user-specific data is properly scoped.
+
+Pay particular attention to:
+
+* conversations
+* messages
+* emotion records
+* journal entries
+* memory items
+
+Do not trust arbitrary client-supplied user IDs when the authenticated session/user ID is available.
+
+For memory CRUD especially, verify that one user cannot read, modify, approve, reject, or delete another user's memory items.
+
+Use the existing authentication/session mechanism rather than creating a new auth system.
+
+## 9. API ERROR HANDLING
+
+Do not silently swallow important errors.
+
+Where appropriate:
+
+* log useful server-side diagnostic information
+* return safe API errors
+* keep secrets/API keys out of responses and logs
+* preserve graceful fallbacks when the AI provider genuinely fails
+
+Do not expose API keys or sensitive environment variables.
+
+## 10. FRONTEND
+
+Check the chat frontend for:
+
+* stale React state
+* duplicated messages
+* incorrect loading state
+* wrong conversation ID
+* wrong selected mode
+* displaying old assistant responses
+* response rendering problems
+
+Fix only genuine bugs. Do not redesign the UI.
+
+## 11. GEMINI CONFIGURATION
+
+Verify the existing Gemini integration:
+
+* API key is read from the existing environment variable
+* configured model is valid
+* request format is correct
+* response parsing is correct
+* errors are handled correctly
+
+Do not ask me to paste any API key or secret into chat.
+
+Do not replace Gemini with another AI provider.
+
+## 12. DO NOT BREAK EXISTING FEATURES
+
+Preserve:
+
+* Listen
+* Understand
+* Reframe
+* Help
+* Private mode
+* authentication
+* conversations
+* emotion detection
+* memory
+* journal
+* dashboard
+* existing UI
+* existing deployment configuration
+
+Do not introduce a new framework or rewrite the project.
+
+Prefer the smallest clean changes that fix the actual problems.
+
+## 13. TEST EVERYTHING AFTER FIXING
+
+Run:
+
+1. TypeScript/type checks.
+2. Unsaid frontend production build.
+3. API server build.
+4. Start the application if possible.
+
+Then manually/API test at least:
+
+### Listen
+
+"hello how are you"
+"I had a really good day today"
+"I am feeling tired"
+
+### Understand
+
+"I am sad because I failed my exam"
+"I had a good day today"
+"I don't know what I am feeling"
+
+### Reframe
+
+"I made a mistake today and I keep thinking about it"
+"I feel like I am behind everyone else"
+
+### Help
+
+"I can't concentrate on studying"
+"help me plan what to do today"
+
+### Private
+
+Send a private message and verify that private information is not used as normal memory/context.
+
+Also test:
+
+* "hi"
+* "hello"
+* "bye"
+* "i am good now"
+* "i am sad"
+* "help me"
+
+Responses should be meaningfully based on the actual messages, not generic copies.
+
+## 14. FINAL REPORT
+
+When finished, tell me:
+
+1. The exact root cause(s) found.
+2. Every file modified.
+3. What was changed in each file.
+4. Whether Gemini was actually being called before the fix.
+5. Whether fallback replyFor() was being triggered incorrectly.
+6. Whether conversation history/state was involved.
+7. Whether frontend state was involved.
+8. Whether memory/auth/data-scope issues were found.
+9. Typecheck result.
+10. Frontend build result.
+11. Backend build result.
+12. Manual test results for all four modes.
+13. Any remaining issue that could not be verified.
+
+Do not commit.
+Do not push.
+Do not create a new project.
+Do not clone the repository.
+Do not redesign the application.
+
+Fix the existing Unsaid project in place.
