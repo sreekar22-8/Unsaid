@@ -26,6 +26,40 @@ import {
 } from "@workspace/db/schema";
 import { extractMemoryFacts } from "../lib/memory-extractor";
 import { classifyEmotions } from "../lib/emotion-classifier";
+import type { Request } from "express";
+
+/**
+ * Verifies the Supabase JWT from the Authorization header by calling the
+ * Supabase /auth/v1/user endpoint. Returns the authenticated user ID (sub)
+ * or null if unauthenticated / token invalid.
+ *
+ * NEVER trusts a userId from the request body or query string.
+ */
+async function getUserFromRequest(req: Request): Promise<string | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+
+  const token = authHeader.slice(7).trim();
+  if (!token) return null;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) return null;
+
+  try {
+    const resp = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: supabaseAnonKey,
+      },
+    });
+    if (!resp.ok) return null;
+    const data: any = await resp.json();
+    return typeof data?.id === "string" ? data.id : null;
+  } catch {
+    return null;
+  }
+}
 
 const router: IRouter = Router();
 
@@ -1035,13 +1069,15 @@ router.get(
 
 router.get("/companion/memory-items", async (req, res, next) => {
   try {
-    const userId = req.query.userId ? String(req.query.userId) : null;
+    // userId is ALWAYS derived from the verified JWT — never from query params.
+    const userId = await getUserFromRequest(req);
 
     let query = db.select().from(memoryItemsTable);
 
     if (userId) {
       query = query.where(eq(memoryItemsTable.userId, userId)) as any;
     } else {
+      // Unauthenticated callers only see items with no userId (legacy/anon rows)
       query = query.where(isNull(memoryItemsTable.userId)) as any;
     }
 
@@ -1060,7 +1096,10 @@ router.get("/companion/memory-items", async (req, res, next) => {
 
 router.post("/companion/memory-items", async (req, res, next) => {
   try {
-    const { fact, approved = false, userId = null } = req.body ?? {};
+    // userId is ALWAYS derived from the verified JWT — never from the request body.
+    const userId = await getUserFromRequest(req);
+
+    const { fact, approved = false } = req.body ?? {};
     if (!fact || typeof fact !== "string" || !fact.trim()) {
       res.status(400).json({ error: "Fact is required" });
       return;
@@ -1071,7 +1110,7 @@ router.post("/companion/memory-items", async (req, res, next) => {
       .values({
         fact: fact.trim(),
         approved: Boolean(approved),
-        userId: userId ? String(userId) : null,
+        userId,
       })
       .returning();
 
@@ -1087,6 +1126,27 @@ router.post("/companion/memory-items", async (req, res, next) => {
 router.patch(["/companion/memory-items/:id", "/companion/memory-items/:id/approve", "/companion/memory-items/:id/approval"], async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+
+    // Verify ownership: userId from JWT must match the item's userId.
+    const userId = await getUserFromRequest(req);
+
+    const [existing] = await db
+      .select()
+      .from(memoryItemsTable)
+      .where(eq(memoryItemsTable.id, id))
+      .limit(1);
+
+    if (!existing) {
+      res.status(404).json({ error: "Memory item not found" });
+      return;
+    }
+
+    // Ownership check: authenticated user must own this item
+    if (existing.userId !== null && existing.userId !== userId) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
     const { approved, fact } = req.body ?? {};
 
     const updates: Record<string, any> = {};
@@ -1105,13 +1165,11 @@ router.patch(["/companion/memory-items/:id", "/companion/memory-items/:id/approv
     const [updated] = await db
       .update(memoryItemsTable)
       .set(updates)
-      .where(eq(memoryItemsTable.id, id))
+      .where(and(eq(memoryItemsTable.id, id), userId ? eq(memoryItemsTable.userId, userId) : isNull(memoryItemsTable.userId)))
       .returning();
 
     if (!updated) {
-      res.status(404).json({
-        error: "Memory item not found",
-      });
+      res.status(404).json({ error: "Memory item not found" });
       return;
     }
 
@@ -1128,7 +1186,36 @@ router.delete("/companion/memory-items/:id", async (req, res, next) => {
   try {
     const id = Number(req.params.id);
 
-    await db.delete(memoryItemsTable).where(eq(memoryItemsTable.id, id));
+    // Verify ownership: only delete the row if it belongs to the authenticated user.
+    const userId = await getUserFromRequest(req);
+
+    const [existing] = await db
+      .select()
+      .from(memoryItemsTable)
+      .where(eq(memoryItemsTable.id, id))
+      .limit(1);
+
+    if (!existing) {
+      // Already gone — treat as success
+      res.status(204).end();
+      return;
+    }
+
+    if (existing.userId !== null && existing.userId !== userId) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    await db
+      .delete(memoryItemsTable)
+      .where(
+        and(
+          eq(memoryItemsTable.id, id),
+          userId
+            ? eq(memoryItemsTable.userId, userId)
+            : isNull(memoryItemsTable.userId),
+        ),
+      );
 
     res.status(204).end();
   } catch (error) {

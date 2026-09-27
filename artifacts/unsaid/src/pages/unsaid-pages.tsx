@@ -779,6 +779,11 @@ export function MemoryPage() {
 
   const { session } = useAuth();
   const currentUserId = session?.user?.id ?? null;
+  // Build Authorization header from the Supabase JWT so the server can verify
+  // ownership without trusting any client-provided userId parameter.
+  const authHeaders: Record<string, string> = session?.access_token
+    ? { Authorization: `Bearer ${session.access_token}` }
+    : {};
 
   interface MemoryItem {
     id: number;
@@ -821,9 +826,10 @@ export function MemoryPage() {
         data = res.data;
       } else if (res.error) {
         console.warn('Supabase query failed, falling back to API server:', res.error);
-        const apiRes = await fetch(
-          `/api/companion/memory-items${currentUserId ? `?userId=${encodeURIComponent(currentUserId)}` : ''}`,
-        );
+        // Do NOT pass userId in the URL — the server derives it from the JWT.
+        const apiRes = await fetch('/api/companion/memory-items', {
+          headers: { ...authHeaders },
+        });
         if (apiRes.ok) {
           data = await apiRes.json();
         }
@@ -845,9 +851,10 @@ export function MemoryPage() {
     } catch (err) {
       console.error('Error fetching memory items:', err);
       try {
-        const apiRes = await fetch(
-          `/api/companion/memory-items${currentUserId ? `?userId=${encodeURIComponent(currentUserId)}` : ''}`,
-        );
+        // Do NOT pass userId in the URL — the server derives it from the JWT.
+        const apiRes = await fetch('/api/companion/memory-items', {
+          headers: { ...authHeaders },
+        });
         if (apiRes.ok) {
           const apiData = await apiRes.json();
           setItems(
@@ -869,7 +876,8 @@ export function MemoryPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentUserId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUserId, session?.access_token]);
 
   useEffect(() => {
     fetchMemoryItems();
@@ -889,7 +897,7 @@ export function MemoryPage() {
       if (sbError) {
         await fetch(`/api/companion/memory-items/${id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify({ approved: true }),
         });
       }
@@ -911,6 +919,7 @@ export function MemoryPage() {
       if (sbError) {
         await fetch(`/api/companion/memory-items/${id}`, {
           method: 'DELETE',
+          headers: { ...authHeaders },
         });
       }
     } catch (err) {
@@ -949,7 +958,7 @@ export function MemoryPage() {
       if (sbError) {
         await fetch(`/api/companion/memory-items/${id}`, {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify({ fact: trimmed }),
         });
       }
@@ -973,6 +982,7 @@ export function MemoryPage() {
       if (sbError) {
         await fetch(`/api/companion/memory-items/${id}`, {
           method: 'DELETE',
+          headers: { ...authHeaders },
         });
       }
     } catch (err) {
@@ -1010,13 +1020,13 @@ export function MemoryPage() {
           ...prev,
         ]);
       } else {
+        // Do NOT send userId in the body — the server derives it from the JWT.
         const apiRes = await fetch('/api/companion/memory-items', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders },
           body: JSON.stringify({
             fact: trimmed,
             approved: true,
-            userId: currentUserId,
           }),
         });
         if (apiRes.ok) {
