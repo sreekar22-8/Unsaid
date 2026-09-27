@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Link } from 'wouter';
+import { Link, useLocation } from 'wouter';
 import { ArrowUpRight, BarChart3, BookOpen, Check, ChevronDown, Clock3, Feather, Heart, LockKeyhole, MessageCircle, Pencil, Plus, Save, Send, ShieldCheck, Sparkles, Trash2, WandSparkles, X } from 'lucide-react';
 import {
   getGetDashboardSummaryQueryKey,
