@@ -7,6 +7,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { LoginPage, SignupPage } from '@/pages/auth-pages';
+import { LandingPage } from '@/pages/landing-page';
 import { ChatPage, CompanionPage, InsightsPage, JournalPage, MemoryPage, SettingsPage } from '@/pages/unsaid-pages';
 import { PrivateNotesPage } from '@/pages/private-notes-page';
 import { DashboardPage } from '@/pages/dashboard-page';
@@ -27,7 +28,8 @@ function Router() {
       <Switch>
          <Route path="/login" component={LoginPage} />
          <Route path="/signup" component={SignupPage} />
-         <Route path="/" component={() => <AuthGuard><CompanionPage /></AuthGuard>} />
+         <Route path="/" component={LandingPage} />
+         <Route path="/companion" component={() => <AuthGuard><CompanionPage /></AuthGuard>} />
          <Route path="/dashboard" component={() => <AuthGuard><DashboardPage /></AuthGuard>} />
          <Route path="/chat" component={() => <AuthGuard><ChatPage /></AuthGuard>} />
          <Route path="/journal" component={() => <AuthGuard><JournalPage /></AuthGuard>} />

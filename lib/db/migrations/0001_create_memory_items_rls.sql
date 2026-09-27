@@ -11,6 +11,12 @@ CREATE TABLE IF NOT EXISTS memory_items (
 -- Enable Row Level Security (RLS)
 ALTER TABLE memory_items ENABLE ROW LEVEL SECURITY;
 
+-- Drop existing policies if any
+DROP POLICY IF EXISTS "Users can view their own memory items" ON memory_items;
+DROP POLICY IF EXISTS "Users can insert their own memory items" ON memory_items;
+DROP POLICY IF EXISTS "Users can update their own memory items" ON memory_items;
+DROP POLICY IF EXISTS "Users can delete their own memory items" ON memory_items;
+
 -- RLS Policy: Select
 CREATE POLICY "Users can view their own memory items"
   ON memory_items FOR SELECT

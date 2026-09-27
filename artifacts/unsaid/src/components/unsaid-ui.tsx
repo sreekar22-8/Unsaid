@@ -3,7 +3,7 @@ import { Link, useLocation } from 'wouter';
 import { Activity, BookOpen, Brain, ChevronLeft, ChevronRight, CircleUserRound, Feather, Heart, Home, LockKeyhole, Menu, MoreHorizontal, Settings, Sparkles, X } from 'lucide-react';
 
 const navItems = [
-  { href: '/', label: 'Companion', icon: Home },
+  { href: '/companion', label: 'Companion', icon: Home },
   { href: '/dashboard', label: 'Dashboard', icon: Activity },
   { href: '/journal', label: 'Journal', icon: BookOpen },
   { href: '/insights', label: 'Insights', icon: Brain },
@@ -15,6 +15,7 @@ const secondaryItems = [
 ];
 const topNavItems = [
   { href: '/', label: 'Home' },
+  { href: '/companion', label: 'Companion' },
   { href: '/chat', label: 'Chat' },
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/journal', label: 'Journal' },
@@ -83,6 +84,15 @@ export function PageHeading({ eyebrow, title, description, action }: { eyebrow: 
 
 export function LoadingBlocks({ count = 3 }: { count?: number }) {
   return <div className="space-y-3" aria-label="Loading" data-testid="status-loading">{Array.from({ length: count }).map((_, i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-muted/80" />)}</div>;
+}
+
+export function LoadingSpinner({ label = 'Loading...' }: { label?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center gap-3 py-10 text-center" role="status" aria-live="polite" data-testid="status-loading-spinner">
+      <div className="size-7 animate-spin rounded-full border-2 border-primary/25 border-t-primary" />
+      {label && <span className="font-mono-ui text-xs tracking-wider text-muted-foreground">{label}</span>}
+    </div>
+  );
 }
 
 export function ErrorNotice({ message = 'This space is taking a little longer to open.' }: { message?: string }) {

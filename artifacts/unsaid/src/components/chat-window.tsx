@@ -45,6 +45,7 @@ const EMOTION_COLORS: Record<string, { bg: string; text: string; dot: string }> 
   // warm muted
   shame:       { bg: 'bg-[#f0e0f0]/70 dark:bg-[#2a182a]/60',  text: 'text-[#622062] dark:text-[#c88ac8]', dot: 'bg-[#9a359a]' },
   guilt:       { bg: 'bg-[#f0e0f0]/70 dark:bg-[#2a182a]/60',  text: 'text-[#622062] dark:text-[#c88ac8]', dot: 'bg-[#9a359a]' },
+  regret:      { bg: 'bg-[#e0e5f5]/70 dark:bg-[#1a1f3b]/60',  text: 'text-[#384278] dark:text-[#a8b0e8]', dot: 'bg-[#5562b0]' },
   // neutral
   uncertain:   { bg: 'bg-[#e8e5df]/70 dark:bg-[#28251f]/60',  text: 'text-[#5a5040] dark:text-[#b8a888]', dot: 'bg-[#8a7a60]' },
   confused:    { bg: 'bg-[#e8e5df]/70 dark:bg-[#28251f]/60',  text: 'text-[#5a5040] dark:text-[#b8a888]', dot: 'bg-[#8a7a60]' },
@@ -94,7 +95,8 @@ export function detectLocalEmotions(text: string): EmotionTag[] {
     [/(sad|lonely|empty|miss|cry|grief|heartbreak)/, 'sadness'],
     [/(alone|isolat|loneli)/, 'loneliness'],
     [/(shame|ashamed|embarrass)/, 'shame'],
-    [/(guilty|guilt|regret)/, 'guilt'],
+    [/(regret|wish i had|wish i hadn't|shouldn't have)/, 'regret'],
+    [/(guilty|guilt|blame myself)/, 'guilt'],
     [/(happy|glad|excited|relief|grateful|hopeful|good)/, 'hopeful'],
     [/(confus|unsure|uncertain|lost)/, 'confused'],
   ];

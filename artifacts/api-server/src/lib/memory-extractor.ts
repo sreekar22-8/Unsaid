@@ -5,15 +5,111 @@
  */
 
 const ANTHROPIC_MODEL = 'claude-3-haiku-20240307';
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-flash-latest'];
 
 export async function extractMemoryFacts(
   content: string,
-  _conversationMode: string = 'listen'
+  _conversationMode: string = 'listen',
+  contextMessages?: string[]
 ): Promise<string[]> {
   const trimmed = (content || '').trim();
-  if (trimmed.length < 5) return [];
+  if (trimmed.length < 5 && (!contextMessages || contextMessages.length === 0)) return [];
 
-  // 1. Try Anthropic API if key is available
+  const conversationSnippet = contextMessages && contextMessages.length > 0
+    ? `Recent conversation context:\n${contextMessages.map((m) => `- ${m}`).join('\n')}\n\nLatest user message: "${trimmed.slice(0, 1000)}"`
+    : `Message: "${trimmed.slice(0, 1000)}"`;
+
+  const prompt = `You are an observant, empathetic companion. Based on the user's message and chat conversation, extract 1 to 2 short, objective "facts" noticed about the user (e.g. "User is going through a breakup", "User has an important presentation tomorrow", "User is having trouble sleeping").
+
+Return ONLY a valid JSON array of 1 to 2 concise string statements, e.g.:
+["User is navigating a difficult breakup"]
+
+If the message is generic, conversational pleasantry, or has no noticeable personal details, return:
+[]
+
+${conversationSnippet}`;
+
+  // 1. Try Gemini API if key is available
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey) {
+    for (const model of GEMINI_MODELS) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiKey,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature: 0.2,
+              maxOutputTokens: 200,
+            },
+          }),
+        });
+
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const match = text.match(/\[[\s\S]*\]/);
+          if (match) {
+            const parsed = JSON.parse(match[0]);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              const facts = parsed
+                .slice(0, 2)
+                .map((item) => String(item).trim())
+                .filter(Boolean);
+              if (facts.length > 0) return facts;
+            }
+          }
+        }
+      } catch {
+        // Try next model or provider
+      }
+    }
+  }
+
+  // 2. Try OpenAI API if key is available
+  const openaiKey = process.env.OPENAI_API_KEY;
+  if (openaiKey) {
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${openaiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0.2,
+          max_tokens: 200,
+        }),
+      });
+
+      if (response.ok) {
+        const data: any = await response.json();
+        const text = data?.choices?.[0]?.message?.content || '';
+        const match = text.match(/\[[\s\S]*\]/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const facts = parsed
+              .slice(0, 2)
+              .map((item) => String(item).trim())
+              .filter(Boolean);
+            if (facts.length > 0) return facts;
+          }
+        }
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  // 3. Try Anthropic API if key is available
   const anthropicKey = process.env.ANTHROPIC_API_KEY;
   if (anthropicKey) {
     try {
@@ -27,21 +123,7 @@ export async function extractMemoryFacts(
         body: JSON.stringify({
           model: ANTHROPIC_MODEL,
           max_tokens: 200,
-          messages: [
-            {
-              role: 'user',
-              content: `You are an observant, empathetic companion. Based on the user's message below, extract 1 to 2 short, objective "facts" noticed about the user (e.g. "User is going through a breakup", "User has an important presentation tomorrow", "User is having trouble sleeping").
-
-Return ONLY a valid JSON array of 1 to 2 concise string statements, e.g.:
-["User is navigating a difficult breakup"]
-
-If the message is generic or has no personal details, return:
-[]
-
-Message:
-"${trimmed.slice(0, 1000)}"`,
-            },
-          ],
+          messages: [{ role: 'user', content: prompt }],
         }),
       });
 
@@ -52,7 +134,11 @@ Message:
         if (match) {
           const parsed = JSON.parse(match[0]);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed.slice(0, 2).map((item) => String(item).trim()).filter(Boolean);
+            const facts = parsed
+              .slice(0, 2)
+              .map((item) => String(item).trim())
+              .filter(Boolean);
+            if (facts.length > 0) return facts;
           }
         }
       }
@@ -61,44 +147,7 @@ Message:
     }
   }
 
-  // 2. Try Gemini API if key is available
-  const geminiKey = process.env.GEMINI_API_KEY;
-  if (geminiKey) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `Extract 1-2 short facts noticed about the user from this message. Return ONLY a JSON array of strings like ["User is going through a breakup"]. If nothing notable, return [].\n\nMessage: "${trimmed.slice(0, 1000)}"`,
-                },
-              ],
-            },
-          ],
-        }),
-      });
-
-      if (response.ok) {
-        const data: any = await response.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        const match = text.match(/\[[\s\S]*\]/);
-        if (match) {
-          const parsed = JSON.parse(match[0]);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed.slice(0, 2).map((item) => String(item).trim()).filter(Boolean);
-          }
-        }
-      }
-    } catch {
-      // Fall through to heuristic extractor
-    }
-  }
-
-  // 3. Empathetic Heuristic Extractor (reliable zero-latency fallback)
+  // 4. Empathetic Heuristic Extractor (reliable zero-latency fallback)
   return extractHeuristicFacts(trimmed);
 }
 
@@ -182,23 +231,29 @@ Message:
 
   const geminiKey = process.env.GEMINI_API_KEY;
   if (geminiKey) {
-    try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-        }),
-      });
+    for (const model of GEMINI_MODELS) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': geminiKey,
+          },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+          }),
+        });
 
-      if (response.ok) {
-        const data: any = await response.json();
-        const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
-        return parseClassifiedEmotions(text);
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          const emotions = parseClassifiedEmotions(text);
+          if (emotions.length > 0) return emotions;
+        }
+      } catch {
+        // Try next model or fallback
       }
-    } catch {
-      // Classification is optional; the saved chat message remains valid.
     }
   }
 

@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { ArrowRight, Feather, LockKeyhole, Mail } from 'lucide-react';
 import { Link, useLocation } from 'wouter';
 import { useAuth } from '@/components/auth-provider';
+import { LoadingSpinner } from '@/components/unsaid-ui';
 
 type AuthMode = 'login' | 'signup';
 
@@ -19,7 +20,13 @@ function AuthFrame({ children }: { children: React.ReactNode }) {
 }
 
 function AuthLoading() {
-  return <AuthFrame><div className="grid min-h-[250px] place-items-center text-sm text-muted-foreground">Opening your private space…</div></AuthFrame>;
+  return (
+    <AuthFrame>
+      <div className="flex min-h-[220px] items-center justify-center">
+        <LoadingSpinner label="Opening your private space..." />
+      </div>
+    </AuthFrame>
+  );
 }
 
 function AuthPage({ mode }: { mode: AuthMode }) {

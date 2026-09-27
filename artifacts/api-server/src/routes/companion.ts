@@ -26,6 +26,40 @@ import {
 } from "@workspace/db/schema";
 import { extractMemoryFacts } from "../lib/memory-extractor";
 import { classifyEmotions } from "../lib/emotion-classifier";
+import type { Request } from "express";
+
+/**
+ * Verifies the Supabase JWT from the Authorization header by calling the
+ * Supabase /auth/v1/user endpoint. Returns the authenticated user ID (sub)
+ * or null if unauthenticated / token invalid.
+ *
+ * NEVER trusts a userId from the request body or query string.
+ */
+async function getUserFromRequest(req: Request): Promise<string | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+
+  const token = authHeader.slice(7).trim();
+  if (!token) return null;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseAnonKey = process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) return null;
+
+  try {
+    const resp = await fetch(`${supabaseUrl}/auth/v1/user`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        apikey: supabaseAnonKey,
+      },
+    });
+    if (!resp.ok) return null;
+    const data: any = await resp.json();
+    return typeof data?.id === "string" ? data.id : null;
+  } catch {
+    return null;
+  }
+}
 
 const router: IRouter = Router();
 
@@ -104,21 +138,132 @@ export const SYSTEM_PROMPTS: Record<Mode, string> = {
   private: "Reflect gently without storing long-term memory.",
 };
 
-function replyFor(mode: Mode, text: string) {
+function replyFor(mode: Mode, text: string, memoryFacts?: string[]) {
   const emotion = emotionFor(text);
+  let base = "";
   if (mode === "listen") {
-    return `I hear how much weight is sitting underneath this ${emotion} feeling. It makes total sense that you feel this way, and you don't have to fix or make it neat right now.`;
+    base = `I hear how much weight is sitting underneath this ${emotion} feeling. It makes total sense that you feel this way, and you don't have to fix or make it neat right now.`;
+  } else if (mode === "understand") {
+    base = `It sounds like ${emotion} might be sharing space with something else you haven't fully named yet. If you look closely at what's happening, what single part feels hardest to speak out loud right now?`;
+  } else if (mode === "reframe") {
+    base = `Carrying regret around this can feel heavy. Looking at this with compassion: what was actually within your control, how would you advise a dear friend in your exact shoes, and what is one thing you handled right?`;
+  } else if (mode === "help") {
+    base = `Here are 2 concrete, realistic small next steps we can take together:\n1. Take a 5-minute pause without forcing yourself to solve the whole picture.\n2. Identify the single smallest action within your reach today. Would you like to talk through that step first?`;
+  } else {
+    base = `This can stay unshared here. You can leave it unfinished if that is the most honest place to leave it.`;
   }
-  if (mode === "understand") {
-    return `It sounds like ${emotion} might be sharing space with something else you haven't fully named yet. If you look closely at what's happening, what single part feels hardest to speak out loud right now?`;
+
+  if (memoryFacts && memoryFacts.length > 0) {
+    const factText = memoryFacts[0]
+      .replace(/^user\s+is\s+/i, "you are ")
+      .replace(/^user\s+has\s+/i, "you have ")
+      .replace(/^user\s+/i, "you ");
+    return `${base}\n\nI’m also gently keeping in mind that ${factText}. You don't have to carry that alone.`;
   }
-  if (mode === "reframe") {
-    return `Carrying regret around this can feel heavy. Looking at this with compassion: what was actually within your control, how would you advise a dear friend in your exact shoes, and what is one thing you handled right?`;
+
+  return base;
+}
+
+async function getApprovedMemoryFacts(userId?: string | null): Promise<string[]> {
+  try {
+    const items = await db
+      .select({ fact: memoryItemsTable.fact })
+      .from(memoryItemsTable)
+      .where(
+        and(
+          eq(memoryItemsTable.approved, true),
+          userId
+            ? eq(memoryItemsTable.userId, userId)
+            : isNull(memoryItemsTable.userId),
+        ),
+      )
+      .limit(5);
+    return items.map((i) => i.fact);
+  } catch {
+    return [];
   }
-  if (mode === "help") {
-    return `Here are 2 concrete, realistic small next steps we can take together:\n1. Take a 5-minute pause without forcing yourself to solve the whole picture.\n2. Identify the single smallest action within your reach today. Would you like to talk through that step first?`;
+}
+
+async function generateCompanionReply(
+  mode: Mode,
+  content: string,
+  approvedFacts: string[] = [],
+  conversationHistory: Array<{ role: string; content: string }> = [],
+): Promise<string> {
+  // If private mode, memory is never used (reflects gently without storing or recalling long-term memory)
+  // Private notes are strictly excluded and never passed to the AI
+  const factsToUse = mode === "private" ? [] : approvedFacts;
+
+  const modePrompt = SYSTEM_PROMPTS[mode] || SYSTEM_PROMPTS.listen;
+
+  let memoryContext = "";
+  if (factsToUse.length > 0) {
+    memoryContext = `\n\nApproved facts remembered about the user (use these naturally for empathy, context, and continuity — do not recite or list them mechanically):\n${factsToUse
+      .map((fact) => `- ${fact}`)
+      .join("\n")}`;
   }
-  return `This can stay unshared here. You can leave it unfinished if that is the most honest place to leave it.`;
+
+  const geminiKey = process.env.GEMINI_API_KEY;
+  if (geminiKey && content.trim()) {
+    const systemInstruction = `${modePrompt}${memoryContext}\n\nYou are Unsaid, a thoughtful, calm, empathetic companion. Speak with gentle warmth, clarity, and care.`;
+
+    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+    if (conversationHistory.length > 0) {
+      for (const msg of conversationHistory.slice(-6)) {
+        contents.push({
+          role: msg.role === "assistant" ? "model" : "user",
+          parts: [{ text: msg.content }],
+        });
+      }
+    }
+    contents.push({
+      role: "user",
+      parts: [{ text: content }],
+    });
+
+    const models = [
+      "gemini-3.8-flash",
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-flash-latest",
+    ];
+
+    for (const model of models) {
+      try {
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${geminiKey}`;
+        const response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-goog-api-key": geminiKey,
+          },
+          body: JSON.stringify({
+            systemInstruction: {
+              parts: [{ text: systemInstruction }],
+            },
+            contents,
+            generationConfig: {
+              temperature: 0.7,
+              maxOutputTokens: 350,
+            },
+          }),
+        });
+
+        if (response.ok) {
+          const data: any = await response.json();
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (text && text.trim()) {
+            return text.trim();
+          }
+        }
+      } catch {
+        // Fallback to next model or rule-based response
+      }
+    }
+  }
+
+  // Fallback to empathetic response incorporating approved memory facts
+  return replyFor(mode, content, factsToUse);
 }
 
 let schemaInitialized = false;
@@ -314,6 +459,7 @@ router.post("/companion/conversations", async (req, res, next) => {
     const [row] = await db
       .insert(conversationsTable)
       .values({
+        userId: null,
         title: input.title || "A new conversation",
         mode: input.mode || "listen",
       })
@@ -386,12 +532,33 @@ router.post(
         content,
       ).catch(() => {});
 
+      const approvedFacts = await getApprovedMemoryFacts(
+        userMessage.userId || conversation.userId || null,
+      );
+
+      const recentHistory = await db
+        .select({
+          role: messagesTable.role,
+          content: messagesTable.content,
+        })
+        .from(messagesTable)
+        .where(eq(messagesTable.conversationId, conversationId))
+        .orderBy(messagesTable.createdAt)
+        .limit(8);
+
+      const replyContent = await generateCompanionReply(
+        mode,
+        content,
+        approvedFacts,
+        recentHistory,
+      );
+
       const [assistantMessage] = await db
         .insert(messagesTable)
         .values({
           conversationId,
           role: "assistant",
-          content: replyFor(mode, content),
+          content: replyContent,
           emotion: userEmotion,
         })
         .returning();
@@ -629,7 +796,7 @@ async function buildDashboard(
   journalCount?: number,
   existingMessages?: Array<typeof messagesTable.$inferSelect>,
 ) {
-  const [conversations, journals, messages] = await Promise.all([
+  const [conversations, journals, messages, emotionTagRows] = await Promise.all([
     conversationCount === undefined
       ? db.select().from(conversationsTable)
       : Promise.resolve([]),
@@ -641,25 +808,36 @@ async function buildDashboard(
     existingMessages
       ? Promise.resolve(existingMessages)
       : db.select().from(messagesTable),
+
+    db.select().from(emotionTagsTable),
   ]);
 
   const allMessages = existingMessages ?? messages;
 
   const counts = new Map<string, number>();
 
+  // Count from the single-emotion field on messages
   allMessages.forEach((message) => {
     if (message.emotion && message.role === "user") {
       counts.set(message.emotion, (counts.get(message.emotion) ?? 0) + 1);
     }
   });
 
+  // Also count from the richer AI-classified emotion_tags table
+  emotionTagRows.forEach((tag) => {
+    const key = tag.emotion.toLowerCase();
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+
+  const palette = ["#c88770", "#7e9d99", "#c1a15d", "#8d83a8", "#7aab8a"];
+
   const topEmotions = [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 4)
+    .slice(0, 5)
     .map(([emotion, count], index) => ({
       emotion,
       count,
-      color: ["#c88770", "#7e9d99", "#c1a15d", "#8d83a8"][index],
+      color: palette[index],
     }));
 
   return {
@@ -677,7 +855,7 @@ async function buildDashboard(
           {
             emotion: "uncertain",
             count: 1,
-            color: "#c88770",
+            color: palette[0],
           },
         ],
 
@@ -694,6 +872,7 @@ router.post("/chat", async (req, res, next) => {
       content,
       conversationId: reqId,
       mode: requestedMode,
+      userId: reqUserId,
     } = req.body ?? {};
 
     let conversationId = reqId ? Number(reqId) : null;
@@ -707,12 +886,17 @@ router.post("/chat", async (req, res, next) => {
         .limit(1);
     }
 
+    const effectiveUserId = reqUserId
+      ? String(reqUserId)
+      : (conversation?.userId ?? null);
+
     if (!conversation) {
       [conversation] = await db
         .insert(conversationsTable)
         .values({
           title: (content || "A new conversation").slice(0, 34),
           mode: requestedMode || "listen",
+          userId: effectiveUserId,
         })
         .returning();
 
@@ -730,16 +914,35 @@ router.post("/chat", async (req, res, next) => {
         role: "user",
         content: content || "",
         emotion: userEmotion,
+        userId: effectiveUserId,
       })
       .returning();
 
     void saveEmotionTags(
       userMessage,
-      userMessage.userId || conversation.userId || null,
+      effectiveUserId,
       content || "",
     ).catch(() => {});
 
-    const replyContent = replyFor(mode, content || "");
+    // Include the user's approved memory_items as context for the AI (never private_notes)
+    const approvedFacts = await getApprovedMemoryFacts(effectiveUserId);
+
+    const recentHistory = await db
+      .select({
+        role: messagesTable.role,
+        content: messagesTable.content,
+      })
+      .from(messagesTable)
+      .where(eq(messagesTable.conversationId, conversation.id))
+      .orderBy(messagesTable.createdAt)
+      .limit(8);
+
+    const replyContent = await generateCompanionReply(
+      mode,
+      content || "",
+      approvedFacts,
+      recentHistory,
+    );
 
     const [assistantMessage] = await db
       .insert(messagesTable)
@@ -748,6 +951,7 @@ router.post("/chat", async (req, res, next) => {
         role: "assistant",
         content: replyContent,
         emotion: userEmotion,
+        userId: effectiveUserId,
       })
       .returning();
 
@@ -865,12 +1069,16 @@ router.get(
 
 router.get("/companion/memory-items", async (req, res, next) => {
   try {
-    const userId = req.query.userId ? String(req.query.userId) : null;
+    // userId is ALWAYS derived from the verified JWT — never from query params.
+    const userId = await getUserFromRequest(req);
 
     let query = db.select().from(memoryItemsTable);
 
     if (userId) {
       query = query.where(eq(memoryItemsTable.userId, userId)) as any;
+    } else {
+      // Unauthenticated callers only see items with no userId (legacy/anon rows)
+      query = query.where(isNull(memoryItemsTable.userId)) as any;
     }
 
     const rows = await query.orderBy(desc(memoryItemsTable.createdAt));
@@ -886,21 +1094,82 @@ router.get("/companion/memory-items", async (req, res, next) => {
   }
 });
 
-router.patch("/companion/memory-items/:id/approve", async (req, res, next) => {
+router.post("/companion/memory-items", async (req, res, next) => {
+  try {
+    // userId is ALWAYS derived from the verified JWT — never from the request body.
+    const userId = await getUserFromRequest(req);
+
+    const { fact, approved = false } = req.body ?? {};
+    if (!fact || typeof fact !== "string" || !fact.trim()) {
+      res.status(400).json({ error: "Fact is required" });
+      return;
+    }
+
+    const [created] = await db
+      .insert(memoryItemsTable)
+      .values({
+        fact: fact.trim(),
+        approved: Boolean(approved),
+        userId,
+      })
+      .returning();
+
+    res.status(201).json({
+      ...created,
+      createdAt: created.createdAt.toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.patch(["/companion/memory-items/:id", "/companion/memory-items/:id/approve", "/companion/memory-items/:id/approval"], async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const { approved = true } = req.body ?? {};
+
+    // Verify ownership: userId from JWT must match the item's userId.
+    const userId = await getUserFromRequest(req);
+
+    const [existing] = await db
+      .select()
+      .from(memoryItemsTable)
+      .where(eq(memoryItemsTable.id, id))
+      .limit(1);
+
+    if (!existing) {
+      res.status(404).json({ error: "Memory item not found" });
+      return;
+    }
+
+    // Ownership check: authenticated user must own this item
+    if (existing.userId !== null && existing.userId !== userId) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    const { approved, fact } = req.body ?? {};
+
+    const updates: Record<string, any> = {};
+    if (typeof approved === "boolean") {
+      updates.approved = approved;
+    } else if (req.body?.approved !== undefined) {
+      updates.approved = Boolean(req.body.approved);
+    }
+    if (typeof fact === "string" && fact.trim()) {
+      updates.fact = fact.trim();
+    }
+    if (Object.keys(updates).length === 0) {
+      updates.approved = true;
+    }
 
     const [updated] = await db
       .update(memoryItemsTable)
-      .set({ approved: Boolean(approved) })
-      .where(eq(memoryItemsTable.id, id))
+      .set(updates)
+      .where(and(eq(memoryItemsTable.id, id), userId ? eq(memoryItemsTable.userId, userId) : isNull(memoryItemsTable.userId)))
       .returning();
 
     if (!updated) {
-      res.status(404).json({
-        error: "Memory item not found",
-      });
+      res.status(404).json({ error: "Memory item not found" });
       return;
     }
 
@@ -917,7 +1186,36 @@ router.delete("/companion/memory-items/:id", async (req, res, next) => {
   try {
     const id = Number(req.params.id);
 
-    await db.delete(memoryItemsTable).where(eq(memoryItemsTable.id, id));
+    // Verify ownership: only delete the row if it belongs to the authenticated user.
+    const userId = await getUserFromRequest(req);
+
+    const [existing] = await db
+      .select()
+      .from(memoryItemsTable)
+      .where(eq(memoryItemsTable.id, id))
+      .limit(1);
+
+    if (!existing) {
+      // Already gone — treat as success
+      res.status(204).end();
+      return;
+    }
+
+    if (existing.userId !== null && existing.userId !== userId) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+
+    await db
+      .delete(memoryItemsTable)
+      .where(
+        and(
+          eq(memoryItemsTable.id, id),
+          userId
+            ? eq(memoryItemsTable.userId, userId)
+            : isNull(memoryItemsTable.userId),
+        ),
+      );
 
     res.status(204).end();
   } catch (error) {
