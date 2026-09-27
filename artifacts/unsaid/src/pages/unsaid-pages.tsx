@@ -24,7 +24,7 @@ import {
   useUpdateMemorySettings,
 } from '@workspace/api-client-react';
 import type { ConversationMode, EmotionDetection, JournalEntry } from '@workspace/api-client-react';
-import { AppShell, Button, EmptyState, ErrorNotice, formatDate, LoadingBlocks, PageHeading, Toggle } from '@/components/unsaid-ui';
+import { AppShell, Button, EmptyState, ErrorNotice, formatDate, LoadingBlocks, LoadingSpinner, PageHeading, Toggle } from '@/components/unsaid-ui';
 import { ChatWindow, detectLocalEmotions, EmotionBadge } from '@/components/chat-window';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/components/auth-provider';
@@ -114,13 +114,13 @@ export function CompanionPage() {
         <div className="relative flex min-h-[470px] flex-col overflow-hidden rounded-[28px] border border-border bg-card quiet-shadow">
           <div className="surface-grid pointer-events-none absolute inset-0 opacity-40" />
           <div className="relative flex items-center justify-between border-b border-border/70 px-5 py-4 md:px-7"><div className="flex items-center gap-3"><span className="grid size-9 place-items-center rounded-xl bg-secondary text-primary"><Feather size={17} /></span><div><p className="text-xs font-bold">{activeConversation?.title ?? 'A fresh beginning'}</p><p className="font-mono-ui text-[9px] uppercase tracking-[.14em] text-muted-foreground">{modes.find((item) => item.id === mode)?.label} mode</p></div></div><button className="rounded-xl p-2 text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => startConversation()} aria-label="Start a new conversation" data-testid="button-new-conversation"><Plus size={18} /></button></div>
-           <div className="relative flex-1 space-y-5 overflow-y-auto px-5 py-7 md:px-10">{messagesQuery.isLoading && <LoadingBlocks count={2} />}{!messagesQuery.isLoading && messages.length === 0 && <div className="flex min-h-[270px] flex-col items-center justify-center text-center"><div className="relative mb-6"><span className="absolute inset-0 animate-pulse-soft rounded-full bg-accent/20 blur-xl" /><span className="relative grid size-16 place-items-center rounded-full border border-accent/40 bg-secondary text-primary"><Sparkles size={22} /></span></div><p className="font-display text-2xl">There is time for this.</p><p className="mt-2 max-w-xs text-sm leading-5 text-muted-foreground">Tell me the part you have been carrying around.</p></div>}{messages.map((message, index) => <div key={message.id} className={`flex animate-rise gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`} style={{ animationDelay: `${Math.min(index * 45, 300)}ms` }} data-testid={`message-${message.id}`}><div className={`flex flex-col items-end gap-1.5 ${message.role === 'assistant' ? 'items-start' : ''}`}><div className={`max-w-[min(580px,88%)] rounded-[20px] px-4 py-3.5 text-sm leading-6 ${message.role === 'user' ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md border border-border bg-background text-foreground'}`}><p>{message.content}</p>{message.emotion && <span className="mt-2 inline-block font-mono-ui text-[9px] uppercase tracking-wider opacity-60">{message.emotion}</span>}</div>{message.role === 'user' && <div className="flex flex-wrap justify-end gap-1 px-1" aria-label="Detected emotions">{detectLocalEmotions(message.content).map((tag) => <EmotionBadge key={tag.emotion} tag={tag} />)}</div>}</div></div>)}</div>
-          <form onSubmit={submit} className="relative border-t border-border/70 bg-background/70 p-4 md:p-5"><div className="flex items-end gap-3 rounded-2xl border border-border bg-card p-2 pl-4 transition-colors focus-within:border-primary/60"><textarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }} placeholder="Begin with a sentence, a fragment, or nothing polished..." rows={2} className="max-h-28 min-h-[46px] flex-1 resize-none bg-transparent py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground/65" data-testid="input-message" /><button type="submit" disabled={!draft.trim() || sendMessage.isPending} className="grid size-10 shrink-0 place-items-center rounded-xl bg-accent text-foreground transition-transform hover:scale-105 disabled:opacity-40" aria-label="Send message" data-testid="button-send-message">{sendMessage.isPending ? <span className="size-4 animate-spin rounded-full border-2 border-foreground/30 border-t-foreground" /> : <Send size={17} />}</button></div><div className="mt-2 flex items-center justify-between px-1 font-mono-ui text-[9px] uppercase tracking-[.13em] text-muted-foreground/70"><span>Shift + return for a new line</span><span className="flex items-center gap-1"><LockKeyhole size={10} />Only you can see this</span></div></form>
+           <div className="relative flex-1 space-y-5 overflow-y-auto px-5 py-7 md:px-10">{messagesQuery.isLoading && <div className="py-12"><LoadingSpinner label="Opening space..." /></div>}{!messagesQuery.isLoading && messages.length === 0 && <div className="flex min-h-[270px] flex-col items-center justify-center text-center"><div className="relative mb-6"><span className="absolute inset-0 animate-pulse-soft rounded-full bg-accent/20 blur-xl" /><span className="relative grid size-16 place-items-center rounded-full border border-accent/40 bg-secondary text-primary"><Sparkles size={22} /></span></div><p className="font-display text-2xl">There is time for this.</p><p className="mt-2 max-w-xs text-sm leading-5 text-muted-foreground">Tell me the part you have been carrying around.</p></div>}{messages.map((message, index) => <div key={message.id} className={`flex animate-rise gap-3 ${message.role === 'user' ? 'justify-end' : 'justify-start'}`} style={{ animationDelay: `${Math.min(index * 45, 300)}ms` }} data-testid={`message-${message.id}`}><div className={`flex flex-col items-end gap-1.5 ${message.role === 'assistant' ? 'items-start' : ''}`}><div className={`max-w-[min(580px,88%)] rounded-[20px] px-4 py-3.5 text-sm leading-6 ${message.role === 'user' ? 'rounded-br-md bg-primary text-primary-foreground' : 'rounded-bl-md border border-border bg-background text-foreground'}`}><p>{message.content}</p>{message.emotion && <span className="mt-2 inline-block font-mono-ui text-[9px] uppercase tracking-wider opacity-60">{message.emotion}</span>}</div>{message.role === 'user' && <div className="flex flex-wrap justify-end gap-1 px-1" aria-label="Detected emotions">{detectLocalEmotions(message.content).map((tag) => <EmotionBadge key={tag.emotion} tag={tag} />)}</div>}</div></div>)}</div>
+          <form onSubmit={submit} className="relative border-t border-border/70 bg-background/70 p-4 md:p-5"><div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-2.5 rounded-2xl border border-border bg-card p-2 pl-3 sm:pl-4 transition-colors focus-within:border-primary/60"><textarea value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(e); } }} placeholder="Begin with a sentence, a fragment, or nothing polished..." rows={2} className="max-h-28 min-h-[46px] flex-1 resize-none bg-transparent py-2 text-sm leading-5 outline-none placeholder:text-muted-foreground/65" data-testid="input-message" /><button type="submit" disabled={!draft.trim() || sendMessage.isPending} className="grid size-10 shrink-0 self-end sm:self-center place-items-center rounded-xl bg-accent text-foreground transition-transform hover:scale-105 disabled:opacity-40" aria-label="Send message" data-testid="button-send-message">{sendMessage.isPending ? <span className="size-4 animate-spin rounded-full border-2 border-foreground/30 border-t-foreground" /> : <Send size={17} />}</button></div><div className="mt-2 flex items-center justify-between px-1 font-mono-ui text-[9px] uppercase tracking-[.13em] text-muted-foreground/70"><span>Shift + return for a new line</span><span className="flex items-center gap-1"><LockKeyhole size={10} />Only you can see this</span></div></form>
         </div>
         {notice && <div className="mt-3 text-xs text-accent" data-testid="status-companion-notice">{notice}</div>}
       </section>
       <aside className="space-y-5 animate-rise stagger-2">
-        <div className="rounded-[24px] border border-border bg-secondary/60 p-5"><SectionLabel>Recent spaces</SectionLabel>{conversationsQuery.isLoading && <LoadingBlocks count={3} />}{conversations.length === 0 && !conversationsQuery.isLoading && <p className="text-sm leading-5 text-muted-foreground">Your first conversation can be small. One honest sentence is enough.</p>}<div className="space-y-1">{conversations.slice(0, 5).map((conversation) => <button key={conversation.id} onClick={() => { setActiveId(conversation.id); setMode(conversation.mode); }} className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left transition-colors ${activeId === conversation.id ? 'bg-card' : 'hover:bg-card/60'}`} data-testid={`button-conversation-${conversation.id}`}><span className="min-w-0"><span className="block truncate text-xs font-semibold">{conversation.title || 'Untitled space'}</span><span className="mt-1 block font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">{formatDate(conversation.updatedAt)}</span></span><ChevronDown size={14} className="-rotate-90 text-muted-foreground" /></button>)}</div><Button variant="quiet" className="mt-3 w-full justify-between border border-dashed border-primary/25" onClick={() => startConversation()}><span>Open a new space</span><Plus size={14} /></Button></div>
+        <div className="rounded-[24px] border border-border bg-secondary/60 p-5"><SectionLabel>Recent spaces</SectionLabel>{conversationsQuery.isLoading && <LoadingBlocks count={3} />}{conversations.length === 0 && !conversationsQuery.isLoading && <div className="rounded-xl border border-dashed border-primary/20 bg-card/40 p-3.5 text-center"><p className="text-xs leading-5 text-muted-foreground">No conversations yet. One honest sentence is enough to begin.</p></div>}<div className="space-y-1">{conversations.slice(0, 5).map((conversation) => <button key={conversation.id} onClick={() => { setActiveId(conversation.id); setMode(conversation.mode); }} className={`flex w-full items-center justify-between rounded-xl px-3 py-3 text-left transition-colors ${activeId === conversation.id ? 'bg-card' : 'hover:bg-card/60'}`} data-testid={`button-conversation-${conversation.id}`}><span className="min-w-0"><span className="block truncate text-xs font-semibold">{conversation.title || 'Untitled space'}</span><span className="mt-1 block font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">{formatDate(conversation.updatedAt)}</span></span><ChevronDown size={14} className="-rotate-90 text-muted-foreground" /></button>)}</div><Button variant="quiet" className="mt-3 w-full justify-between border border-dashed border-primary/25" onClick={() => startConversation()}><span>Open a new space</span><Plus size={14} /></Button></div>
         <div className="rounded-[24px] border border-border bg-card p-5"><SectionLabel>What I notice</SectionLabel>{detection ? <div className="animate-rise"><div className="flex items-end justify-between"><span className="font-display text-3xl">{detection.primary}</span><span className="font-mono-ui text-[10px] text-accent">{Math.round(detection.intensity * 100)}% intensity</span></div><div className="mt-3 flex flex-wrap gap-1.5">{detection.secondary.map((label) => <span key={label} className="rounded-full bg-muted px-2.5 py-1 text-[10px] text-muted-foreground">{label}</span>)}</div><p className="mt-4 border-l-2 border-accent pl-3 text-xs leading-5 text-muted-foreground">{detection.reflection}</p></div> : <div className="flex gap-3 text-sm leading-5 text-muted-foreground"><WandSparkles size={16} className="mt-0.5 shrink-0 text-accent" /><p>Share a thought and I will gently reflect the feeling underneath it.</p></div>}</div>
         <Link href="/journal" className="group flex items-center justify-between rounded-[24px] bg-primary p-5 text-primary-foreground transition-transform hover:-translate-y-0.5" data-testid="link-journal-prompt"><div><p className="font-display text-xl">Leave a trace</p><p className="mt-1 text-xs text-primary-foreground/65">Save something for later.</p></div><ArrowUpRight size={18} className="transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" /></Link>
       </aside>
@@ -142,7 +142,7 @@ function JournalEditor({ entry, onClose, onSaved }: { entry?: JournalEntry; onCl
     if (entry) update.mutate({ entryId: entry.id, data: { title, content, mood } }, { onSuccess: done });
     else create.mutate({ data: { title, content, mood } }, { onSuccess: done });
   };
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/25 p-0 backdrop-blur-sm sm:items-center sm:p-5"><div className="w-full max-w-2xl rounded-t-[28px] border border-border bg-card p-6 shadow-2xl sm:rounded-[28px] md:p-8" role="dialog" aria-modal="true" data-testid="dialog-journal-editor"><div className="mb-6 flex items-center justify-between"><div><div className="font-mono-ui text-[10px] uppercase tracking-[.18em] text-primary">{entry ? 'Edit entry' : 'New entry'}</div><h2 className="mt-2 font-display text-3xl">{entry ? 'Return to this thought' : 'Make a little room'}</h2></div><button onClick={onClose} className="rounded-xl p-2 hover:bg-muted" aria-label="Close editor" data-testid="button-close-journal-editor"><X size={19} /></button></div><form onSubmit={save} className="space-y-4"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A title, if it wants one" className="w-full border-b border-border bg-transparent py-3 font-display text-2xl outline-none placeholder:text-muted-foreground/50 focus:border-primary" data-testid="input-journal-title" /><textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="What is here?" rows={7} autoFocus className="w-full resize-none rounded-2xl border border-border bg-background p-4 text-sm leading-6 outline-none placeholder:text-muted-foreground/60 focus:border-primary" data-testid="input-journal-content" /><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><label htmlFor="mood" className="mb-1 block font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">The weather inside</label><select id="mood" value={mood} onChange={(e) => setMood(e.target.value)} className="rounded-xl border border-border bg-background px-3 py-2 text-xs outline-none" data-testid="select-journal-mood"><option>A little tender</option><option>Clearer than before</option><option>Heavy, but here</option><option>Quietly hopeful</option><option>Unsettled</option></select></div><div className="flex gap-2"><Button type="button" variant="quiet" onClick={onClose}>Not now</Button><Button type="submit" disabled={!content.trim() || create.isPending || update.isPending}><Save size={14} />{entry ? 'Save changes' : 'Keep this'}</Button></div></div></form></div></div>;
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/25 p-0 backdrop-blur-sm sm:items-center sm:p-5"><div className="w-full max-w-2xl max-h-[90dvh] overflow-y-auto rounded-t-[28px] border border-border bg-card p-6 shadow-2xl sm:rounded-[28px] md:p-8" role="dialog" aria-modal="true" data-testid="dialog-journal-editor"><div className="mb-6 flex items-center justify-between"><div><div className="font-mono-ui text-[10px] uppercase tracking-[.18em] text-primary">{entry ? 'Edit entry' : 'New entry'}</div><h2 className="mt-2 font-display text-3xl">{entry ? 'Return to this thought' : 'Make a little room'}</h2></div><button onClick={onClose} className="rounded-xl p-2 hover:bg-muted" aria-label="Close editor" data-testid="button-close-journal-editor"><X size={19} /></button></div><form onSubmit={save} className="space-y-4"><input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="A title, if it wants one" className="w-full border-b border-border bg-transparent py-3 font-display text-2xl outline-none placeholder:text-muted-foreground/50 focus:border-primary" data-testid="input-journal-title" /><textarea value={content} onChange={(e) => setContent(e.target.value)} placeholder="What is here?" rows={7} autoFocus className="w-full resize-none rounded-2xl border border-border bg-background p-4 text-sm leading-6 outline-none placeholder:text-muted-foreground/60 focus:border-primary" data-testid="input-journal-content" /><div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center"><div><label htmlFor="mood" className="mb-1 block font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground">The weather inside</label><select id="mood" value={mood} onChange={(e) => setMood(e.target.value)} className="rounded-xl border border-border bg-background px-3 py-2 text-xs outline-none" data-testid="select-journal-mood"><option>A little tender</option><option>Clearer than before</option><option>Heavy, but here</option><option>Quietly hopeful</option><option>Unsettled</option></select></div><div className="flex gap-2"><Button type="button" variant="quiet" onClick={onClose}>Not now</Button><Button type="submit" disabled={!content.trim() || create.isPending || update.isPending}><Save size={14} />{entry ? 'Save changes' : 'Keep this'}</Button></div></div></form></div></div>;
 }
 
 export function JournalPage() {
@@ -155,7 +155,7 @@ export function JournalPage() {
   const deleteEntry = useDeleteJournalEntry();
   const remove = (id: number) => { if (window.confirm('Forget this journal entry?')) deleteEntry.mutate({ entryId: id }, { onSuccess: () => query.refetch() }); };
   return <AppShell><PageHeading eyebrow="Your journal" title="A place to put it down." description="Not everything needs to be solved. Some things feel different once they have somewhere to land." action={<Button onClick={() => { setEditing(undefined); setEditorOpen(true); }} data-testid="button-new-journal-entry"><Plus size={15} />New entry</Button>} />
-    {query.isError && !entries.length ? <ErrorNotice message="Your journal is safe, but it is not responding right now." /> : query.isLoading && !entries.length ? <LoadingBlocks count={4} /> : entries.length === 0 ? <EmptyState icon={BookOpen} title="The first page is blank" description="Write toward the feeling, not a perfect summary." action={<Button onClick={() => setEditorOpen(true)}><Feather size={14} />Begin a page</Button>} /> : <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{entries.map((entry, index) => <article key={entry.id} className={`group relative flex min-h-[250px] flex-col rounded-[25px] border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${index === 0 ? 'md:col-span-2 bg-secondary/65' : ''}`} data-testid={`card-journal-entry-${entry.id}`}><div className="mb-8 flex items-start justify-between"><span className="rounded-full bg-background/70 px-2.5 py-1 font-mono-ui text-[9px] uppercase tracking-wider text-primary">{entry.mood || 'Unmarked'}</span><div className="flex gap-1 opacity-0 transition-opacity group-hover:opacity-100"><button onClick={() => { setEditing(entry); setEditorOpen(true); }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`Edit ${entry.title || 'entry'}`} data-testid={`button-edit-entry-${entry.id}`}><Feather size={14} /></button><button onClick={() => remove(entry.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Delete ${entry.title || 'entry'}`} data-testid={`button-delete-entry-${entry.id}`}><Trash2 size={14} /></button></div></div><h2 className="font-display text-2xl tracking-[-.03em]">{entry.title || 'Untitled thought'}</h2><p className="mt-3 line-clamp-4 text-sm leading-6 text-muted-foreground">{entry.content}</p><div className="mt-auto flex items-center gap-1.5 pt-7 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground"><Clock3 size={11} />{formatDate(entry.updatedAt || entry.createdAt, true)}</div></article>)}</div>}{editorOpen && <JournalEditor entry={editing} onClose={() => setEditorOpen(false)} onSaved={() => {}} />}</AppShell>;
+    {query.isError && !entries.length ? <ErrorNotice message="Your journal is safe, but it is not responding right now." /> : query.isLoading && !entries.length ? <div className="py-12"><LoadingSpinner label="Gathering your journal entries..." /></div> : entries.length === 0 ? <EmptyState icon={BookOpen} title="No journal entries yet — write your first one" description="Write toward the feeling, not a perfect summary. Your private thoughts land gently here." action={<Button onClick={() => setEditorOpen(true)} data-testid="button-empty-new-entry"><Feather size={14} />Write your first entry</Button>} /> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">{entries.map((entry, index) => <article key={entry.id} className={`group relative flex min-h-[250px] flex-col rounded-[25px] border border-border bg-card p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-lg ${index === 0 ? 'sm:col-span-2 bg-secondary/65' : ''}`} data-testid={`card-journal-entry-${entry.id}`}><div className="mb-8 flex items-start justify-between"><span className="rounded-full bg-background/70 px-2.5 py-1 font-mono-ui text-[9px] uppercase tracking-wider text-primary">{entry.mood || 'Unmarked'}</span><div className="flex gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"><button onClick={() => { setEditing(entry); setEditorOpen(true); }} className="rounded-lg p-2 text-muted-foreground hover:bg-muted hover:text-foreground" aria-label={`Edit ${entry.title || 'entry'}`} data-testid={`button-edit-entry-${entry.id}`}><Feather size={14} /></button><button onClick={() => remove(entry.id)} className="rounded-lg p-2 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label={`Delete ${entry.title || 'entry'}`} data-testid={`button-delete-entry-${entry.id}`}><Trash2 size={14} /></button></div></div><h2 className="font-display text-2xl tracking-[-.03em]">{entry.title || 'Untitled thought'}</h2><p className="mt-3 line-clamp-4 text-sm leading-6 text-muted-foreground">{entry.content}</p><div className="mt-auto flex items-center gap-1.5 pt-7 font-mono-ui text-[9px] uppercase tracking-wider text-muted-foreground"><Clock3 size={11} />{formatDate(entry.updatedAt || entry.createdAt, true)}</div></article>)}</div>}{editorOpen && <JournalEditor entry={editing} onClose={() => setEditorOpen(false)} onSaved={() => {}} />}</AppShell>;
 }
 
 function getMoodColor(mood?: string | null): string {
@@ -397,6 +397,10 @@ export function InsightsPage() {
       {query.isError && !summary ? (
         <div className="mt-5">
           <ErrorNotice message="The reflection board is resting. Check back in a moment." />
+        </div>
+      ) : query.isLoading && !summary ? (
+        <div className="mt-8">
+          <LoadingSpinner label="Gathering your reflections..." />
         </div>
       ) : (
         <>
@@ -1107,7 +1111,9 @@ export function MemoryPage() {
       {error && <ErrorNotice message={error} />}
 
       {loading ? (
-        <LoadingBlocks count={3} />
+        <div className="py-12">
+          <LoadingSpinner label="Loading your memory space..." />
+        </div>
       ) : (
         <div className="space-y-8">
           {/* Unapproved Facts Section */}
@@ -1251,6 +1257,12 @@ export function MemoryPage() {
                 icon={LockKeyhole}
                 title="No approved memories yet"
                 description="The AI will only remember approved facts in future conversations. Approve suggestions above or add one directly to give your companion continuity."
+                action={
+                  <Button onClick={() => setIsAdding(true)} data-testid="button-empty-add-fact">
+                    <Plus size={14} />
+                    Add your first memory
+                  </Button>
+                }
               />
             ) : (
               <div className="space-y-3">
@@ -1342,8 +1354,114 @@ export function MemoryPage() {
 }
 
 export function SettingsPage() {
+  const { session, signOut } = useAuth();
+  const [, setLocation] = useLocation();
   const [notifications, setNotifications] = useState(true);
   const [showInsights, setShowInsights] = useState(true);
   const [saved, setSaved] = useState(false);
-  return <AppShell><PageHeading eyebrow="The private details" title="Make it feel like yours." description="Small choices for the way you want Unsaid to show up." /><div className="grid gap-5 lg:grid-cols-[1fr_320px]"><div className="space-y-5"><section className="rounded-[25px] border border-border bg-card p-6"><SectionLabel>Companion presence</SectionLabel><div className="divide-y divide-border/70"><div className="flex items-center justify-between gap-6 py-5 first:pt-2"><div><h2 className="text-sm font-bold">Gentle check-in reminders</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">A soft nudge when you have asked for one.</p></div><Toggle enabled={notifications} label="gentle check-in reminders" onChange={setNotifications} /></div><div className="flex items-center justify-between gap-6 py-5"><div><h2 className="text-sm font-bold">Use reflections in Insights</h2><p className="mt-1 text-xs leading-5 text-muted-foreground">Let patterns from your conversations shape your dashboard.</p></div><Toggle enabled={showInsights} label="use reflections in insights" onChange={setShowInsights} /></div></div></section><section className="rounded-[25px] border border-border bg-card p-6"><SectionLabel>Your data</SectionLabel><div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-sm font-bold">Everything can leave with you.</h2><p className="mt-1 max-w-lg text-xs leading-5 text-muted-foreground">Your journal, conversations, and memories belong to you. You can request a copy or clear a space whenever you need.</p></div><Button variant="outline" onClick={() => setSaved(true)} data-testid="button-export-data"><ArrowUpRight size={14} />Request export</Button></div></section><Button onClick={() => setSaved(true)} data-testid="button-save-settings"><Check size={14} />{saved ? 'Saved for now' : 'Save preferences'}</Button></div><aside className="h-fit rounded-[25px] bg-primary p-6 text-primary-foreground"><div className="mb-5 grid size-11 place-items-center rounded-2xl bg-accent text-foreground"><ShieldCheck size={20} /></div><h2 className="font-display text-2xl">No performance here.</h2><p className="mt-3 text-sm leading-6 text-primary-foreground/65">Unsaid is a room to be honest in, not a place to become a better version of yourself on schedule.</p><div className="mt-8 space-y-3 border-t border-primary-foreground/15 pt-5 font-mono-ui text-[9px] uppercase tracking-[.15em] text-primary-foreground/55"><div className="flex items-center gap-2"><Check size={12} className="text-accent" />Private by default</div><div className="flex items-center gap-2"><Check size={12} className="text-accent" />You choose what stays</div><div className="flex items-center gap-2"><Check size={12} className="text-accent" />No perfect words needed</div></div></aside></div></AppShell>;
+
+  const handleSignOut = async () => {
+    await signOut();
+    setLocation('/');
+  };
+
+  return (
+    <AppShell>
+      <PageHeading
+        eyebrow="The private details"
+        title="Make it feel like yours."
+        description="Small choices for the way you want Unsaid to show up."
+      />
+      <div className="grid gap-5 lg:grid-cols-[1fr_320px]">
+        <div className="space-y-5">
+          <section className="rounded-[25px] border border-border bg-card p-6">
+            <SectionLabel>Companion presence</SectionLabel>
+            <div className="divide-y divide-border/70">
+              <div className="flex items-center justify-between gap-6 py-5 first:pt-2">
+                <div>
+                  <h2 className="text-sm font-bold">Gentle check-in reminders</h2>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    A soft nudge when you have asked for one.
+                  </p>
+                </div>
+                <Toggle
+                  enabled={notifications}
+                  label="gentle check-in reminders"
+                  onChange={setNotifications}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-6 py-5">
+                <div>
+                  <h2 className="text-sm font-bold">Use reflections in Insights</h2>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Let patterns from your conversations shape your dashboard.
+                  </p>
+                </div>
+                <Toggle
+                  enabled={showInsights}
+                  label="use reflections in insights"
+                  onChange={setShowInsights}
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[25px] border border-border bg-card p-6">
+            <SectionLabel>Your data</SectionLabel>
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-sm font-bold">Everything can leave with you.</h2>
+                <p className="mt-1 max-w-lg text-xs leading-5 text-muted-foreground">
+                  Your journal, conversations, and memories belong to you. You can request a copy or clear a space whenever you need.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => setSaved(true)}
+                data-testid="button-export-data"
+              >
+                <ArrowUpRight size={14} />Request export
+              </Button>
+            </div>
+          </section>
+
+          {session?.user && (
+            <section className="rounded-[25px] border border-border bg-card p-6" data-testid="section-account">
+              <SectionLabel>Your account</SectionLabel>
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-sm font-bold">{session.user.email}</h2>
+                  <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                    Signed in to your private Unsaid space.
+                  </p>
+                </div>
+                <Button variant="danger" onClick={handleSignOut} data-testid="button-sign-out">
+                  Sign out
+                </Button>
+              </div>
+            </section>
+          )}
+
+          <Button onClick={() => setSaved(true)} data-testid="button-save-settings">
+            <Check size={14} />{saved ? 'Saved for now' : 'Save preferences'}
+          </Button>
+        </div>
+
+        <aside className="h-fit rounded-[25px] bg-primary p-6 text-primary-foreground">
+          <div className="mb-5 grid size-11 place-items-center rounded-2xl bg-accent text-foreground">
+            <ShieldCheck size={20} />
+          </div>
+          <h2 className="font-display text-2xl">No performance here.</h2>
+          <p className="mt-3 text-sm leading-6 text-primary-foreground/65">
+            Unsaid is a room to be honest in, not a place to become a better version of yourself on schedule.
+          </p>
+          <div className="mt-8 space-y-3 border-t border-primary-foreground/15 pt-5 font-mono-ui text-[9px] uppercase tracking-[.15em] text-primary-foreground/55">
+            <div className="flex items-center gap-2"><Check size={12} className="text-accent" />Private by default</div>
+            <div className="flex items-center gap-2"><Check size={12} className="text-accent" />You choose what stays</div>
+            <div className="flex items-center gap-2"><Check size={12} className="text-accent" />No perfect words needed</div>
+          </div>
+        </aside>
+      </div>
+    </AppShell>
+  );
 }
